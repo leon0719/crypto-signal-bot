@@ -29,12 +29,15 @@ export function editDistance(a, b) {
   return prev[n];
 }
 
-// 依相似度給分(越小越相似)。
+// 依相似度給分(越小越相似)。99 以上視為不相關,會被濾掉。
 function rank(query, base) {
   if (base === query) return 0;
-  if (base.startsWith(query)) return 1 + (base.length - query.length) / 100;
-  if (base.includes(query)) return 2 + base.indexOf(query) / 100;
-  return 3 + editDistance(query, base);
+  if (base.startsWith(query)) return 1 + (base.length - query.length) / 100; // 前綴
+  if (query.startsWith(base)) return 1.5 + (query.length - base.length) / 100; // 使用者多打字(DOGEE→DOGE)
+  if (base.includes(query)) return 2 + base.indexOf(query) / 100; // 包含
+  // 編輯距離:僅在「同首字母」時才採信,否則對短代號會出現一堆無關結果。
+  if (base[0] === query[0]) return 3 + editDistance(query, base);
+  return 99;
 }
 
 // 回傳最多 max 個相近的 base 幣種。抓清單失敗時回 []。
@@ -49,11 +52,13 @@ export async function suggestSymbols(market, rawSymbol, max = 5) {
   }
   // 編輯距離容忍度:查詢越長允許差越多。
   const maxDist = Math.max(2, Math.ceil(query.length / 2));
-  return bases
-    .map((b) => ({ b, score: rank(query, b) }))
-    // 保留:前綴/包含(score<3),或編輯距離在容忍範圍內。
-    .filter((x) => x.score < 3 || x.score - 3 <= maxDist)
-    .sort((a, b) => a.score - b.score)
-    .slice(0, max)
-    .map((x) => x.b);
+  return (
+    bases
+      .map((b) => ({ b, score: rank(query, b) }))
+      // 保留:前綴/包含(score<3),或同首字母且編輯距離在容忍範圍內(score<99)。
+      .filter((x) => x.score < 3 || (x.score < 99 && x.score - 3 <= maxDist))
+      .sort((a, b) => a.score - b.score)
+      .slice(0, max)
+      .map((x) => x.b)
+  );
 }

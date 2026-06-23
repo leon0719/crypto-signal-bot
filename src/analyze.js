@@ -52,7 +52,10 @@ async function notFoundMessage(cmd, err) {
         suggestionQuickReply(matches, cmd.market),
       );
     }
-    return textMessage(`❓ 找不到 ${cmd.symbol},也沒有相近的幣種。\n請確認代號,或輸入 help。`, symbolQuickReply());
+    return textMessage(
+      `❓ 找不到 ${cmd.symbol},也沒有相近的幣種。\n請確認代號,或輸入 help。`,
+      symbolQuickReply(),
+    );
   }
   return textMessage(
     `❌ ${cmd.symbol} 抓取失敗:${err.message}\n請確認代號是否正確,或輸入 help 看用法。`,
