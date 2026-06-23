@@ -1,0 +1,4 @@
+# 複製成 .dev.vars 並填入你的 LINE Messaging API 憑證。
+# 兩者都在 LINE Developers Console → 你的 Messaging API channel 取得。
+LINE_CHANNEL_ACCESS_TOKEN="你的-channel-access-token"
+LINE_CHANNEL_SECRET="你的-channel-secret"
