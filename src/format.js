@@ -223,36 +223,37 @@ function leverageRows(lev, isLong, px, lossPct, winPct) {
   return rows;
 }
 
-// 把目前的市場/槓桿帶進 quick reply,點按鈕只換週期。
-function intervalQuickReply(meta) {
-  const suffix = `${meta.market === "spot" ? " spot" : ""}${meta.leverage > 1 ? ` ${meta.leverage}x` : ""}`;
-  const intervals = ["5m", "15m", "1h", "4h", "1d"];
+const QR_MAX_ITEMS = 13; // LINE quick reply 上限
+const QR_MAX_LABEL = 20; // LINE 按鈕文字上限
+const INTERVALS = ["5m", "15m", "1h", "4h", "1d"];
+
+// 由 [label, text] 配對建立 quick reply(集中處理 LINE 的數量/字數上限)。
+function quickReply(pairs) {
   return {
-    items: intervals.map((iv) => ({
+    items: pairs.slice(0, QR_MAX_ITEMS).map(([label, text]) => ({
       type: "action",
-      action: { type: "message", label: iv, text: `${meta.symbol} ${iv}${suffix}` },
+      action: { type: "message", label: String(label).slice(0, QR_MAX_LABEL), text },
     })),
   };
+}
+
+function marketSuffix(meta) {
+  return `${meta.market === "spot" ? " spot" : ""}${meta.leverage > 1 ? ` ${meta.leverage}x` : ""}`;
+}
+
+// 把目前的市場/槓桿帶進 quick reply,點按鈕只換週期。
+function intervalQuickReply(meta) {
+  const suffix = marketSuffix(meta);
+  return quickReply(INTERVALS.map((iv) => [iv, `${meta.symbol} ${iv}${suffix}`]));
 }
 
 // 由模糊查詢結果建立 quick reply(點按鈕直接查該幣,沿用原本市場別)。
 export function suggestionQuickReply(bases, market) {
   const suffix = market === "spot" ? " spot" : "";
-  return {
-    items: bases.slice(0, 13).map((b) => ({
-      type: "action",
-      action: { type: "message", label: b.slice(0, 20), text: `${b}${suffix}` },
-    })),
-  };
+  return quickReply(bases.map((b) => [b, `${b}${suffix}`]));
 }
 
 // 給 help / 錯誤訊息用的常用幣別按鈕。
 export function symbolQuickReply() {
-  const coins = ["BTC", "ETH", "SOL", "BNB", "XRP"];
-  return {
-    items: coins.map((c) => ({
-      type: "action",
-      action: { type: "message", label: c, text: c },
-    })),
-  };
+  return quickReply(["BTC", "ETH", "SOL", "BNB", "XRP"].map((c) => [c, c]));
 }

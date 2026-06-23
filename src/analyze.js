@@ -13,9 +13,13 @@ export async function handleText(text) {
   if (cmd.help) return [textMessage(helpText(), symbolQuickReply())];
 
   const cfg = defaultConfig();
+  // K 線與資金費率彼此獨立,並行抓以省一趟網路延遲(fetchFunding 內部已吞錯回 null)。
+  const fundingPromise =
+    cmd.market === "futures" ? fetchFunding(cmd.symbol) : Promise.resolve(null);
+
   let klines;
   try {
-    klines = await fetchKlines(cmd.market, cmd.symbol, cmd.interval, 300);
+    klines = await fetchKlines(cmd.market, cmd.symbol, cmd.interval);
   } catch (err) {
     return [await notFoundMessage(cmd, err)];
   }
@@ -34,17 +38,13 @@ export async function handleText(text) {
   const res = evalAt(ind, ind.klines.length - 1);
   if (!res) return [textMessage(`❌ ${cmd.symbol} 資料不足以計算指標,請改用較小週期。`)];
 
-  let funding = null;
-  if (cmd.market === "futures") {
-    funding = await fetchFunding(cmd.symbol);
-  }
+  const funding = await fundingPromise;
   return [buildFlexMessage(cmd, ind, res, funding)];
 }
 
 // 代號不存在時,推薦相近幣種。
 async function notFoundMessage(cmd, err) {
-  const notExist = /51001|doesn't exist|not.*exist/i.test(err.message);
-  if (notExist) {
+  if (err.notFound) {
     const matches = await suggestSymbols(cmd.market, cmd.symbol, 5);
     if (matches.length > 0) {
       return textMessage(
