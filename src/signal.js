@@ -152,17 +152,32 @@ function trendComp(ind, i) {
 
 function emaCrossComp(ind, i) {
   const val = sign(ind.emaFast[i] - ind.emaSlow[i]);
-  return { name: "EMA 快慢線", value: val, weight: ind.cfg.weights.emaCross, note: val > 0 ? "快線在上" : "快線在下" };
+  return {
+    name: "EMA 快慢線",
+    value: val,
+    weight: ind.cfg.weights.emaCross,
+    note: val > 0 ? "快線在上" : "快線在下",
+  };
 }
 
 function macdComp(ind, i) {
   const val = sign(ind.macdHist[i]);
-  return { name: "MACD", value: val, weight: ind.cfg.weights.macd, note: val > 0 ? "動能偏多" : "動能偏空" };
+  return {
+    name: "MACD",
+    value: val,
+    weight: ind.cfg.weights.macd,
+    note: val > 0 ? "動能偏多" : "動能偏空",
+  };
 }
 
 function obvComp(ind, i) {
   const val = sign(ind.obvFast[i] - ind.obvSlow[i]);
-  return { name: "OBV 量能", value: val, weight: ind.cfg.weights.obv, note: val > 0 ? "量能流入" : "量能流出" };
+  return {
+    name: "OBV 量能",
+    value: val,
+    weight: ind.cfg.weights.obv,
+    note: val > 0 ? "量能流入" : "量能流出",
+  };
 }
 
 function rsiComp(ind, i) {

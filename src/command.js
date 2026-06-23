@@ -54,6 +54,6 @@ export function helpText() {
     "・btc spot       (現貨)",
     "",
     "週期:1m 5m 15m 1h 4h 1d 1w",
-    "資料來源:OKX。指標僅供參考,非投資建議。",
+    "資料來源:OKX。",
   ].join("\n");
 }

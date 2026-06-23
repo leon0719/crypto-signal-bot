@@ -1,13 +1,12 @@
 // Cloudflare Worker 入口:接收 LINE webhook,分析後以 reply token 回覆。
 
 import { handleText } from "./analyze.js";
-import { replyText, verifySignature } from "./line.js";
+import { replyMessages, textMessage, verifySignature } from "./line.js";
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // 健康檢查 / 根路徑。
     if (request.method === "GET") {
       return new Response("crypto-signal-bot OK", { status: 200 });
     }
@@ -27,17 +26,18 @@ export default {
       return new Response("Bad Request", { status: 400 });
     }
 
-    const events = payload.events || [];
-    // 逐一處理事件;回覆動作放到背景,確保 webhook 能即時回 200(LINE 要求快速回應)。
-    for (const event of events) {
+    for (const event of payload.events || []) {
       if (event.type !== "message" || event.message?.type !== "text") continue;
       const replyToken = event.replyToken;
       const userText = event.message.text;
+      // 回覆放背景,確保 webhook 即時回 200(LINE 要求快速回應)。
       ctx.waitUntil(
         handleText(userText)
-          .then((reply) => replyText(env.LINE_CHANNEL_ACCESS_TOKEN, replyToken, reply))
+          .then((messages) => replyMessages(env.LINE_CHANNEL_ACCESS_TOKEN, replyToken, messages))
           .catch((err) =>
-            replyText(env.LINE_CHANNEL_ACCESS_TOKEN, replyToken, `❌ 發生錯誤:${err.message}`),
+            replyMessages(env.LINE_CHANNEL_ACCESS_TOKEN, replyToken, [
+              textMessage(`❌ 發生錯誤:${err.message}`),
+            ]),
           ),
       );
     }

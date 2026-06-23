@@ -25,20 +25,24 @@ function timingSafeEqual(a, b) {
   return diff === 0;
 }
 
-// 用 reply token 回覆文字訊息(LINE 文字上限 5000 字)。
-export async function replyText(accessToken, replyToken, text) {
+// 用 reply token 回覆訊息陣列(text / flex,可帶 quickReply),最多 5 則。
+export async function replyMessages(accessToken, replyToken, messages) {
   const res = await fetch(REPLY_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${accessToken}`,
     },
-    body: JSON.stringify({
-      replyToken,
-      messages: [{ type: "text", text: text.slice(0, 5000) }],
-    }),
+    body: JSON.stringify({ replyToken, messages: messages.slice(0, 5) }),
   });
   if (!res.ok) {
     console.error(`LINE reply failed: ${res.status} ${await res.text()}`);
   }
+}
+
+// 建立文字訊息(可選 quickReply)。
+export function textMessage(text, quickReply) {
+  const msg = { type: "text", text: String(text).slice(0, 5000) };
+  if (quickReply) msg.quickReply = quickReply;
+  return msg;
 }

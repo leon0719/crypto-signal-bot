@@ -5,5 +5,9 @@
   "compatibility_date": "2026-04-23",
   "observability": {
     "enabled": true
+  },
+  // 明確清空 cron(移除先前加的幣價提醒排程)。
+  "triggers": {
+    "crons": []
   }
 }

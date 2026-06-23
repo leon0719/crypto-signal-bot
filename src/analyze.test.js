@@ -58,23 +58,36 @@ describe("parseCommand", () => {
 });
 
 describe("handleText", () => {
-  test("上升趨勢 → 做多訊號", async () => {
+  test("上升趨勢 → 做多 Flex 圖卡 + quick reply", async () => {
     mockFetch(0.6);
-    const reply = await handleText("btc 1h 10x");
-    expect(reply).toContain("BTCUSDT");
-    expect(reply).toContain("做多");
-    expect(reply).toContain("停損");
-    expect(reply).toContain("槓桿 10×");
+    const [msg] = await handleText("btc 1h 10x");
+    const blob = JSON.stringify(msg);
+    expect(msg.type).toBe("flex");
+    expect(blob).toContain("BTCUSDT");
+    expect(blob).toContain("做多");
+    expect(blob).toContain("停損");
+    expect(blob).toContain("槓桿 10×");
+    // quick reply 選週期,且帶回槓桿
+    expect(msg.quickReply.items.map((i) => i.action.label)).toContain("4h");
+    expect(msg.quickReply.items[0].action.text).toContain("10x");
   });
 
-  test("下降趨勢 → 做空訊號", async () => {
+  test("下降趨勢 → 做空", async () => {
     mockFetch(-0.6);
-    const reply = await handleText("btc");
-    expect(reply).toContain("做空");
+    const [msg] = await handleText("btc");
+    expect(JSON.stringify(msg)).toContain("做空");
   });
 
-  test("help 回使用說明", async () => {
-    const reply = await handleText("help");
-    expect(reply).toContain("加密貨幣訊號機器人");
+  test("不再顯示免責聲明", async () => {
+    mockFetch(0.6);
+    const [msg] = await handleText("btc");
+    expect(JSON.stringify(msg)).not.toContain("非投資建議");
+  });
+
+  test("help 回使用說明 + 幣別按鈕", async () => {
+    const [msg] = await handleText("help");
+    expect(msg.type).toBe("text");
+    expect(msg.text).toContain("加密貨幣訊號機器人");
+    expect(msg.quickReply.items.map((i) => i.action.label)).toContain("BTC");
   });
 });

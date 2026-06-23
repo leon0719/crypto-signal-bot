@@ -51,6 +51,36 @@ export async function fetchKlines(market, symbol, interval, limit = 300) {
   return klines;
 }
 
+const INSTRUMENTS_URL = "https://www.okx.com/api/v5/public/instruments";
+
+// isolate 內快取可用幣種,避免每次失敗都重抓(清單不常變)。
+const _basesCache = new Map(); // instType -> { bases: string[], ts }
+const BASES_TTL_MS = 10 * 60 * 1000;
+
+// 回傳指定市場所有「USDT 計價」的 base 幣種(大寫),例如 ["BTC","ETH",...]。
+export async function fetchUsdtBases(market, now = Date.now()) {
+  const instType = market === "spot" ? "SPOT" : "SWAP";
+  const cached = _basesCache.get(instType);
+  if (cached && now - cached.ts < BASES_TTL_MS) return cached.bases;
+
+  const res = await fetch(`${INSTRUMENTS_URL}?instType=${instType}`);
+  if (!res.ok) throw new Error(`OKX instruments 回應 ${res.status}`);
+  const body = await res.json();
+  if (body.code !== "0") throw new Error(`OKX 錯誤 ${body.code}: ${body.msg}`);
+
+  const set = new Set();
+  for (const it of body.data || []) {
+    if (instType === "SPOT") {
+      if (it.quoteCcy === "USDT" && it.baseCcy) set.add(it.baseCcy.toUpperCase());
+    } else if (typeof it.instId === "string" && it.instId.endsWith("-USDT-SWAP")) {
+      set.add(it.instId.split("-")[0].toUpperCase());
+    }
+  }
+  const bases = [...set];
+  _basesCache.set(instType, { bases, ts: now });
+  return bases;
+}
+
 // 回傳當前資金費率(小數),失敗回 null。
 export async function fetchFunding(symbol) {
   try {
