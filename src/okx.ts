@@ -1,12 +1,23 @@
-// OKX 資料源(K 線 + 資金費率)。Worker 環境用全域 fetch。
+// OKX 資料源(K 線 + 資金費率 + 可用幣種)。Worker 環境用全域 fetch。
+
+import type { Kline, Market } from "./types.js";
 
 const CANDLES_URL = "https://www.okx.com/api/v5/market/candles";
 const FUNDING_URL = "https://www.okx.com/api/v5/public/funding-rate";
-const MAX_CANDLES = 300; // OKX 單次上限
+const INSTRUMENTS_URL = "https://www.okx.com/api/v5/public/instruments";
+const MAX_CANDLES = 300; // OKX 單次上限,超過要翻頁
+
+interface OkxResponse<T = unknown> {
+  code: string;
+  msg: string;
+  data: T;
+}
 
 // 帶型別的 OKX 錯誤;notFound 對應「交易對不存在」(code 51001),供上層判斷是否做模糊推薦。
 export class OkxError extends Error {
-  constructor(code, msg) {
+  code: string;
+  notFound: boolean;
+  constructor(code: string, msg: string) {
     super(`OKX 錯誤 ${code}: ${msg}`);
     this.name = "OkxError";
     this.code = code;
@@ -14,17 +25,16 @@ export class OkxError extends Error {
   }
 }
 
-// 統一的 OKX GET + 錯誤處理。
-async function okxGet(url) {
+async function okxGet<T = unknown>(url: string): Promise<OkxResponse<T>> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`OKX 回應 ${res.status}`);
-  const body = await res.json();
+  const body = (await res.json()) as OkxResponse<T>;
   if (body.code !== "0") throw new OkxError(body.code, body.msg);
   return body;
 }
 
 // market: "spot" | "futures";symbol 例如 BTCUSDT。
-export function instId(market, symbol) {
+export function instId(market: Market, symbol: string): string {
   const s = symbol.toUpperCase();
   let base = "";
   let quote = "";
@@ -42,47 +52,63 @@ export function instId(market, symbol) {
 }
 
 // 1h/4h/1d → 1H/4H/1D;分鐘維持小寫。
-export function okxBar(interval) {
+export function okxBar(interval: string): string {
   if (!interval) return "1H";
   const unit = interval[interval.length - 1];
   return unit === "m" ? interval : interval.toUpperCase();
 }
 
-export async function fetchKlines(market, symbol, interval, limit = MAX_CANDLES) {
+// 抓 K 線,需要超過單次上限時自動以 after 往回翻頁。回傳由舊到新。
+export async function fetchKlines(
+  market: Market,
+  symbol: string,
+  interval: string,
+  limit = MAX_CANDLES,
+): Promise<Kline[]> {
   const inst = instId(market, symbol);
   const bar = okxBar(interval);
-  const url = `${CANDLES_URL}?instId=${encodeURIComponent(inst)}&bar=${bar}&limit=${Math.min(limit, MAX_CANDLES)}`;
-  const body = await okxGet(url);
-  const rows = body.data || [];
-  // OKX 回傳為新到舊,需反轉成舊到新。
-  const klines = rows
-    .map((r) => ({
-      openTime: Number(r[0]),
-      open: Number(r[1]),
-      high: Number(r[2]),
-      low: Number(r[3]),
-      close: Number(r[4]),
-      volume: Number(r[5]),
-    }))
-    .reverse();
-  return klines;
+  const collected: Kline[] = []; // 由新到舊累積
+  let after: string | undefined;
+
+  while (collected.length < limit) {
+    const batch = Math.min(MAX_CANDLES, limit - collected.length);
+    let url = `${CANDLES_URL}?instId=${encodeURIComponent(inst)}&bar=${bar}&limit=${batch}`;
+    if (after) url += `&after=${after}`;
+    const body = await okxGet<string[][]>(url);
+    const rows = body.data || [];
+    if (rows.length === 0) break;
+    for (const r of rows) {
+      collected.push({
+        openTime: Number(r[0]),
+        open: Number(r[1]),
+        high: Number(r[2]),
+        low: Number(r[3]),
+        close: Number(r[4]),
+        volume: Number(r[5]),
+      });
+    }
+    if (rows.length < batch) break; // 沒有更多歷史
+    after = rows[rows.length - 1][0]; // 本批最舊一根,下批取更早
+  }
+
+  return collected.reverse(); // 由舊到新
 }
 
-const INSTRUMENTS_URL = "https://www.okx.com/api/v5/public/instruments";
-
 // isolate 內快取可用幣種,避免每次失敗都重抓(清單不常變)。
-const _basesCache = new Map(); // instType -> { bases: string[], ts }
+const _basesCache = new Map<string, { bases: string[]; ts: number }>();
 const BASES_TTL_MS = 10 * 60 * 1000;
 
 // 回傳指定市場所有「USDT 計價」的 base 幣種(大寫),例如 ["BTC","ETH",...]。
-export async function fetchUsdtBases(market, now = Date.now()) {
+export async function fetchUsdtBases(market: Market, now = Date.now()): Promise<string[]> {
   const instType = market === "spot" ? "SPOT" : "SWAP";
   const cached = _basesCache.get(instType);
   if (cached && now - cached.ts < BASES_TTL_MS) return cached.bases;
 
-  const body = await okxGet(`${INSTRUMENTS_URL}?instType=${instType}`);
+  const body = await okxGet<Array<{ instId?: string; baseCcy?: string; quoteCcy?: string }>>(
+    `${INSTRUMENTS_URL}?instType=${instType}`,
+  );
 
-  const set = new Set();
+  const set = new Set<string>();
   for (const it of body.data || []) {
     if (instType === "SPOT") {
       if (it.quoteCcy === "USDT" && it.baseCcy) set.add(it.baseCcy.toUpperCase());
@@ -96,10 +122,12 @@ export async function fetchUsdtBases(market, now = Date.now()) {
 }
 
 // 回傳當前資金費率(小數),失敗回 null。
-export async function fetchFunding(symbol) {
+export async function fetchFunding(symbol: string): Promise<number | null> {
   try {
     const inst = instId("futures", symbol);
-    const body = await okxGet(`${FUNDING_URL}?instId=${encodeURIComponent(inst)}`);
+    const body = await okxGet<Array<{ fundingRate?: string }>>(
+      `${FUNDING_URL}?instId=${encodeURIComponent(inst)}`,
+    );
     const rate = body?.data?.[0]?.fundingRate;
     return rate != null ? Number(rate) : null;
   } catch {

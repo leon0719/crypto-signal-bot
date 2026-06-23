@@ -1,9 +1,10 @@
 // 幣種模糊查詢:代號打錯時推薦相近的 OKX 幣別。
 
 import { fetchUsdtBases } from "./okx.js";
+import type { Market } from "./types.js";
 
 // 把 BTCUSDT / BTC-USDT 之類還原成 base(BTC)。
-export function toBase(symbol) {
+export function toBase(symbol: string): string {
   return symbol
     .toUpperCase()
     .replace(/[-_]/g, "")
@@ -11,13 +12,13 @@ export function toBase(symbol) {
 }
 
 // Levenshtein 編輯距離。
-export function editDistance(a, b) {
+export function editDistance(a: string, b: string): number {
   const m = a.length;
   const n = b.length;
   if (m === 0) return n;
   if (n === 0) return m;
   let prev = Array.from({ length: n + 1 }, (_, i) => i);
-  let curr = new Array(n + 1);
+  let curr = new Array<number>(n + 1);
   for (let i = 1; i <= m; i++) {
     curr[0] = i;
     for (let j = 1; j <= n; j++) {
@@ -30,7 +31,7 @@ export function editDistance(a, b) {
 }
 
 // 依相似度給分(越小越相似)。99 以上視為不相關,會被濾掉。
-function rank(query, base) {
+function rank(query: string, base: string): number {
   if (base === query) return 0;
   if (base.startsWith(query)) return 1 + (base.length - query.length) / 100; // 前綴
   if (query.startsWith(base)) return 1.5 + (query.length - base.length) / 100; // 使用者多打字(DOGEE→DOGE)
@@ -41,10 +42,14 @@ function rank(query, base) {
 }
 
 // 回傳最多 max 個相近的 base 幣種。抓清單失敗時回 []。
-export async function suggestSymbols(market, rawSymbol, max = 5) {
+export async function suggestSymbols(
+  market: Market,
+  rawSymbol: string,
+  max = 5,
+): Promise<string[]> {
   const query = toBase(rawSymbol);
   if (!query) return [];
-  let bases;
+  let bases: string[];
   try {
     bases = await fetchUsdtBases(market);
   } catch {

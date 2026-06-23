@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { verifySignature } from "./line.js";
 
-async function sign(secret, body) {
+export async function sign(secret: string, body: string): Promise<string> {
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
     "raw",

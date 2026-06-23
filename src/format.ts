@@ -1,6 +1,17 @@
 // 把分析結果格式化成 LINE Flex 圖卡 + quick reply。
 
-import { Direction } from "./signal.js";
+import {
+  type AnalyzeCommand,
+  Direction,
+  type DirectionValue,
+  type Flex,
+  type HtfInfo,
+  type Indicators,
+  type LineMessage,
+  type Market,
+  type QuickReply,
+  type Result,
+} from "./types.js";
 
 const COLOR = {
   long: "#16a34a",
@@ -10,25 +21,30 @@ const COLOR = {
   text: "#333333",
 };
 
-function fmtNum(v) {
+const QR_MAX_ITEMS = 13; // LINE quick reply 上限
+const QR_MAX_LABEL = 20; // LINE 按鈕文字上限
+const ALT_TEXT_MAX = 400; // LINE flex altText 上限
+const INTERVALS = ["5m", "15m", "1h", "4h", "1d"];
+
+function fmtNum(v: number): string {
   if (v >= 1000) return v.toLocaleString("en-US", { maximumFractionDigits: 2 });
   if (v >= 1) return v.toFixed(4);
   return v.toFixed(6);
 }
 
-function dirColor(dir) {
+function dirColor(dir: DirectionValue): string {
   if (dir === Direction.Long) return COLOR.long;
   if (dir === Direction.Short) return COLOR.short;
   return COLOR.neutral;
 }
 
-function dirLabel(dir) {
+function dirLabel(dir: DirectionValue): string {
   if (dir === Direction.Long) return "做多 ▲";
   if (dir === Direction.Short) return "做空 ▼";
   return "觀望 ―";
 }
 
-function conviction(score) {
+function conviction(score: number): string {
   const a = Math.abs(score);
   if (a >= 60) return "強烈";
   if (a >= 25) return "中等";
@@ -36,7 +52,7 @@ function conviction(score) {
 }
 
 // 兩欄一列(左標題、右內容),右側可上色。
-function kvRow(label, value, color = COLOR.text, weight = "regular") {
+function kvRow(label: string, value: string, color: string = COLOR.text, weight = "regular"): Flex {
   return {
     type: "box",
     layout: "baseline",
@@ -47,19 +63,21 @@ function kvRow(label, value, color = COLOR.text, weight = "regular") {
   };
 }
 
-function separator() {
-  return { type: "separator", margin: "md" };
-}
+const separator = (): Flex => ({ type: "separator", margin: "md" });
 
-// meta: { symbol, interval, market, leverage }
-export function buildFlexMessage(meta, ind, res, funding) {
+// 組一張 bubble(單卡與 carousel 共用)。
+export function buildBubble(
+  meta: AnalyzeCommand,
+  ind: Indicators,
+  res: Result,
+  funding: number | null,
+  htf?: HtfInfo,
+): Flex {
   const cfg = ind.cfg;
   const marketZh = meta.market === "spot" ? "現貨" : "合約";
   const accent = dirColor(res.direction);
+  const body: Flex[] = [];
 
-  const body = [];
-
-  // 價格(大字)。
   body.push({
     type: "box",
     layout: "baseline",
@@ -77,7 +95,6 @@ export function buildFlexMessage(meta, ind, res, funding) {
     ],
   });
 
-  // 訊號 + 評分。
   body.push({
     type: "box",
     layout: "baseline",
@@ -101,13 +118,17 @@ export function buildFlexMessage(meta, ind, res, funding) {
       },
     ],
   });
-  body.push(kvRow("信心", conviction(res.score), COLOR.text));
+  body.push(kvRow("信心", conviction(res.score)));
   body.push(kvRow("市場狀態", `${res.regime}｜ADX ${res.adx.toFixed(0)}`));
-  if (funding != null) {
-    body.push(kvRow("資金費率", `${(funding * 100).toFixed(4)}% / 8h`));
+  if (funding != null) body.push(kvRow("資金費率", `${(funding * 100).toFixed(4)}% / 8h`));
+
+  // 多週期確認。
+  if (htf) {
+    const label = `大週期 ${htf.interval}`;
+    const value = htf.conflict ? "方向牴觸 ✗" : "方向一致 ✓";
+    body.push(kvRow(label, value, htf.conflict ? COLOR.short : COLOR.long, "bold"));
   }
 
-  // 指標分項(▲▼ 摘要)。
   body.push(separator());
   body.push({
     type: "text",
@@ -120,19 +141,22 @@ export function buildFlexMessage(meta, ind, res, funding) {
     margin: "md",
   });
 
-  // 進出場規劃。
   body.push(separator());
-  if (res.direction === Direction.Neutral) {
+  // 大週期牴觸時降級為觀望。
+  const effectiveDir = htf?.conflict ? Direction.Neutral : res.direction;
+  if (effectiveDir === Direction.Neutral) {
     body.push({
       type: "text",
-      text: "📌 多空分歧,建議觀望,等評分明確再進場。",
+      text: htf?.conflict
+        ? "📌 大週期方向相反,降級為觀望,不建議逆勢進場。"
+        : "📌 多空分歧,建議觀望,等評分明確再進場。",
       size: "sm",
       color: COLOR.text,
       wrap: true,
       margin: "md",
     });
   } else {
-    const isLong = res.direction === Direction.Long;
+    const isLong = effectiveDir === Direction.Long;
     const px = res.price;
     const atr = res.atr;
     const stop = isLong ? px - cfg.stopATR * atr : px + cfg.stopATR * atr;
@@ -156,11 +180,11 @@ export function buildFlexMessage(meta, ind, res, funding) {
 
     if (meta.leverage > 1 && meta.market === "futures") {
       body.push(separator());
-      body.push(...leverageRows(meta.leverage, isLong, px, lossPct, winPct));
+      for (const row of leverageRows(meta.leverage, isLong, px, lossPct, winPct)) body.push(row);
     }
   }
 
-  const bubble = {
+  return {
     type: "bubble",
     header: {
       type: "box",
@@ -179,22 +203,48 @@ export function buildFlexMessage(meta, ind, res, funding) {
     },
     body: { type: "box", layout: "vertical", spacing: "sm", contents: body },
   };
+}
 
+// 單卡訊息。
+export function buildFlexMessage(
+  meta: AnalyzeCommand,
+  ind: Indicators,
+  res: Result,
+  funding: number | null,
+  htf?: HtfInfo,
+): LineMessage {
+  const bubble = buildBubble(meta, ind, res, funding, htf);
   const altText = `${meta.symbol} ${dirLabel(res.direction)} 評分${res.score.toFixed(0)} 價${fmtNum(res.price)}`;
   return {
     type: "flex",
-    altText: altText.slice(0, 400),
+    altText: altText.slice(0, ALT_TEXT_MAX),
     contents: bubble,
     quickReply: intervalQuickReply(meta),
   };
 }
 
-function leverageRows(lev, isLong, px, lossPct, winPct) {
+// 多週期 carousel 訊息。
+export function buildCarouselMessage(symbol: string, bubbles: Flex[]): LineMessage {
+  return {
+    type: "flex",
+    altText: `${symbol} 多週期分析`.slice(0, ALT_TEXT_MAX),
+    contents: { type: "carousel", contents: bubbles },
+    quickReply: symbolQuickReply(),
+  };
+}
+
+function leverageRows(
+  lev: number,
+  isLong: boolean,
+  px: number,
+  lossPct: number,
+  winPct: number,
+): Flex[] {
   const marginLoss = lossPct * lev;
   const marginGain = winPct * lev;
   const liqDist = 100 / lev;
   const liqPrice = isLong ? px * (1 - 1 / lev) : px * (1 + 1 / lev);
-  const rows = [
+  const rows: Flex[] = [
     {
       type: "text",
       text: `⚡ 槓桿 ${lev}×`,
@@ -223,12 +273,8 @@ function leverageRows(lev, isLong, px, lossPct, winPct) {
   return rows;
 }
 
-const QR_MAX_ITEMS = 13; // LINE quick reply 上限
-const QR_MAX_LABEL = 20; // LINE 按鈕文字上限
-const INTERVALS = ["5m", "15m", "1h", "4h", "1d"];
-
 // 由 [label, text] 配對建立 quick reply(集中處理 LINE 的數量/字數上限)。
-function quickReply(pairs) {
+function quickReply(pairs: Array<[string, string]>): QuickReply {
   return {
     items: pairs.slice(0, QR_MAX_ITEMS).map(([label, text]) => ({
       type: "action",
@@ -237,23 +283,28 @@ function quickReply(pairs) {
   };
 }
 
-function marketSuffix(meta) {
+function marketSuffix(meta: AnalyzeCommand): string {
   return `${meta.market === "spot" ? " spot" : ""}${meta.leverage > 1 ? ` ${meta.leverage}x` : ""}`;
 }
 
-// 把目前的市場/槓桿帶進 quick reply,點按鈕只換週期。
-function intervalQuickReply(meta) {
+// 換週期按鈕 + 多週期捷徑,沿用原本市場別/槓桿。
+function intervalQuickReply(meta: AnalyzeCommand): QuickReply {
   const suffix = marketSuffix(meta);
-  return quickReply(INTERVALS.map((iv) => [iv, `${meta.symbol} ${iv}${suffix}`]));
+  const pairs: Array<[string, string]> = INTERVALS.map((iv) => [
+    iv,
+    `${meta.symbol} ${iv}${suffix}`,
+  ]);
+  pairs.push(["多週期", `${meta.symbol} multi${suffix}`]);
+  return quickReply(pairs);
 }
 
 // 由模糊查詢結果建立 quick reply(點按鈕直接查該幣,沿用原本市場別)。
-export function suggestionQuickReply(bases, market) {
+export function suggestionQuickReply(bases: string[], market: Market): QuickReply {
   const suffix = market === "spot" ? " spot" : "";
   return quickReply(bases.map((b) => [b, `${b}${suffix}`]));
 }
 
 // 給 help / 錯誤訊息用的常用幣別按鈕。
-export function symbolQuickReply() {
-  return quickReply(["BTC", "ETH", "SOL", "BNB", "XRP"].map((c) => [c, c]));
+export function symbolQuickReply(): QuickReply {
+  return quickReply((["BTC", "ETH", "SOL", "BNB", "XRP"] as const).map((c) => [c, c]));
 }

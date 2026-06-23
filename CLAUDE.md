@@ -6,14 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `bun install` — install deps (run once; commit `bun.lock`).
 - `bun run dev` — local Worker at http://localhost:8787 (wrangler dev). Needs `.dev.vars` (copy `.dev.vars.example`).
-- `bun test` — all tests. Single file: `bun test src/suggest.test.js`. By name: `bun test -t "找不到"`.
-- `bun run check` / `npx biome check --write .` — lint + format (Biome). Run before committing.
+- `bun test` — all tests. Single file: `bun test src/suggest.test.ts`. By name: `bun test -t "找不到"`.
+- `bun run check` — gate before committing: `biome check .` + `tsc --noEmit`. (`bun run type-check` for tsc only.)
 - `bunx wrangler deploy` — deploy from local. `bunx wrangler deploy --dry-run` — verify the bundle without shipping.
+- `bun run richmenu <token> <image.png>` — one-time LINE rich-menu setup (`scripts/setup-richmenu.ts`).
 - Secrets (set once, persist across deploys): `bunx wrangler secret put LINE_CHANNEL_ACCESS_TOKEN` and `bunx wrangler secret put LINE_CHANNEL_SECRET`.
 
 ## Conventions
 
-- **Plain JS ESM, zero runtime dependencies** — indicators and LINE/OKX clients are hand-written against Web platform APIs (`fetch`, `crypto.subtle`, `btoa`) available in the Workers runtime. Do not add npm runtime deps without reason.
+- **TypeScript + ESM, zero runtime dependencies** — indicators and LINE/OKX clients are hand-written against Web platform APIs (`fetch`, `crypto.subtle`, `btoa`) available in the Workers runtime. Do not add npm runtime deps without reason. Shared types live in `src/types.ts`; imports use `.js` specifiers (TS `verbatimModuleSyntax`).
 - Comments and all user-facing strings are **繁體中文**.
 - This is a JS port of the sibling Go CLI `../crypto-signal`. The indicator math (`ta.js`) and scoring (`signal.js`) mirror that implementation 1:1 — keep them in sync conceptually; don't "optimize" them into divergence.
 
@@ -25,9 +26,11 @@ A single Cloudflare Worker that turns LINE text messages into crypto technical-a
 
 `fetch` handler only. Flow: `GET *` → health check; `POST /webhook` → `verifySignature` (HMAC-SHA256 of the **raw** body vs `x-line-signature`, see `line.js`) → parse events → for each text message, `handleText()` then `replyMessages()` with the reply token. The reply runs inside `ctx.waitUntil()` so the webhook returns 200 immediately (LINE requires a fast response). There is intentionally **no `scheduled()` handler, KV, or cron** — a price-alert feature was prototyped then removed (`wrangler.jsonc` keeps `"crons": []` to clear any stale schedule).
 
-### Analysis flow (`src/analyze.js` is the orchestrator)
+### Analysis flow (`src/analyze.ts` is the orchestrator)
 
-`handleText(text)` → `parseCommand` (`command.js`, returns `{help}` or `{symbol, interval, market, leverage}`; symbols get `USDT` appended, default futures/1h) → `fetchKlines` (`okx.js`) → `build` then `evalAt` (`signal.js`) → `buildFlexMessage` (`format.js`). Funding rate is fetched **concurrently** with klines (fire the promise before `await`-ing klines) to save a round-trip. Returns an **array of LINE message objects** (not a string) — flex on success, text on help/error.
+`handleText(text)` → `parseCommand` (`command.ts`, returns a `Command` union: `{help}` or `{multi, symbol, interval, market, leverage}`; symbols get `USDT` appended, default futures/1h) → `fetchKlines` (`okx.ts`) → `build` then `evalAt` (`signal.ts`) → `buildFlexMessage` (`format.ts`). Returns an **array of LINE message objects** (not a string) — flex on success, text on help/error.
+
+Three independent fetches run **concurrently** in `handleSingle`: klines, funding rate, and the **higher-timeframe (MTF) score**. `HTF_MAP` maps each interval to a confirming larger one; if the big timeframe's score opposes the signal direction, the card downgrades the plan to 觀望 (`buildBubble` computes `effectiveDir` from `htf.conflict`). `multi` mode (`btc multi`) fans out `MULTI_INTERVALS` into a Flex **carousel** via `buildBubble` per interval.
 
 ### Key cross-file contracts
 
@@ -39,7 +42,7 @@ A single Cloudflare Worker that turns LINE text messages into crypto technical-a
 
 ### Testing model
 
-`bun:test`, no miniflare/wrangler runtime. Tests stub `globalThis.fetch` with `mock()` (route by URL substring — `/market/candles`, `/funding-rate`, `/public/instruments`) and `mock.restore()` in `afterEach`. `verifySignature` is tested by signing a body with the same HMAC then asserting round-trip.
+`bun:test`, no miniflare/wrangler runtime. Tests stub `globalThis.fetch` with `mock()` (route by URL substring — `/market/candles`, `/funding-rate`, `/public/instruments`, `/message/reply`, `/chat/loading/start`) and `mock.restore()` in `afterEach`. `index.test.ts` is the end-to-end check: it signs a body (via `sign()` re-exported from `line.test.ts`), calls `worker.fetch` with a fake `ExecutionContext` that collects `waitUntil` promises, then `await`s them and asserts a reply was POSTed. `bun test` and `tsc --noEmit` both run in CI (`.github/workflows/ci.yml`).
 
 ## Deployment
 

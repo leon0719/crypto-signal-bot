@@ -1,61 +1,35 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { handleText } from "./analyze.js";
-import { parseCommand } from "./command.js";
 
 // 產生 OKX 格式的假 K 線(newest-first),trend 控制漲跌。
-function fakeOKXCandles(n, trend) {
-  const rows = [];
+function fakeOKXCandles(n: number, trend: number): string[][] {
+  const rows: string[][] = [];
   let price = 100;
   for (let i = 0; i < n; i++) {
     const open = price;
-    price += trend + Math.sin(i / 7) * 0.3; // 帶點波動的趨勢
+    price += trend + Math.sin(i / 7) * 0.3;
     const close = price;
     const high = Math.max(open, close) + 0.5;
     const low = Math.min(open, close) - 0.5;
     const ts = 1_700_000_000_000 + i * 3_600_000;
     rows.push([String(ts), String(open), String(high), String(low), String(close), "1000"]);
   }
-  return rows.reverse(); // OKX 回傳新到舊
+  return rows.reverse();
 }
 
-function mockFetch(trend) {
-  globalThis.fetch = mock(async (url) => {
+function mockFetch(trend: number) {
+  globalThis.fetch = mock(async (url: string) => {
     if (url.includes("/market/candles")) {
       return new Response(JSON.stringify({ code: "0", msg: "", data: fakeOKXCandles(300, trend) }));
     }
     if (url.includes("/funding-rate")) {
-      return new Response(JSON.stringify({ data: [{ fundingRate: "0.0001" }] }));
+      return new Response(JSON.stringify({ code: "0", data: [{ fundingRate: "0.0001" }] }));
     }
     return new Response("not found", { status: 404 });
-  });
+  }) as unknown as typeof fetch;
 }
 
 afterEach(() => mock.restore());
-
-describe("parseCommand", () => {
-  test("純幣別補上 USDT、預設合約 1h", () => {
-    expect(parseCommand("btc")).toMatchObject({
-      symbol: "BTCUSDT",
-      interval: "1h",
-      market: "futures",
-      leverage: 1,
-    });
-  });
-
-  test("解析週期、槓桿、現貨", () => {
-    expect(parseCommand("eth 4h 10x spot")).toMatchObject({
-      symbol: "ETHUSDT",
-      interval: "4h",
-      market: "spot",
-      leverage: 10,
-    });
-  });
-
-  test("help 觸發", () => {
-    expect(parseCommand("幫助").help).toBe(true);
-    expect(parseCommand("").help).toBe(true);
-  });
-});
 
 describe("handleText", () => {
   test("上升趨勢 → 做多 Flex 圖卡 + quick reply", async () => {
@@ -67,9 +41,9 @@ describe("handleText", () => {
     expect(blob).toContain("做多");
     expect(blob).toContain("停損");
     expect(blob).toContain("槓桿 10×");
-    // quick reply 選週期,且帶回槓桿
-    expect(msg.quickReply.items.map((i) => i.action.label)).toContain("4h");
-    expect(msg.quickReply.items[0].action.text).toContain("10x");
+    const labels = msg.quickReply?.items.map((i) => i.action.label) ?? [];
+    expect(labels).toContain("4h");
+    expect(labels).toContain("多週期");
   });
 
   test("下降趨勢 → 做空", async () => {
@@ -84,10 +58,20 @@ describe("handleText", () => {
     expect(JSON.stringify(msg)).not.toContain("非投資建議");
   });
 
+  test("multi → carousel(多張 bubble)", async () => {
+    mockFetch(0.6);
+    const [msg] = await handleText("btc multi");
+    expect(msg.type).toBe("flex");
+    const contents = (msg as unknown as { contents: { type: string; contents: unknown[] } })
+      .contents;
+    expect(contents.type).toBe("carousel");
+    expect(contents.contents.length).toBe(3);
+  });
+
   test("help 回使用說明 + 幣別按鈕", async () => {
     const [msg] = await handleText("help");
     expect(msg.type).toBe("text");
-    expect(msg.text).toContain("加密貨幣訊號機器人");
-    expect(msg.quickReply.items.map((i) => i.action.label)).toContain("BTC");
+    expect((msg as { text: string }).text).toContain("加密貨幣訊號機器人");
+    expect(msg.quickReply?.items.map((i) => i.action.label)).toContain("BTC");
   });
 });

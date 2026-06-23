@@ -1,11 +1,11 @@
-// 技術指標(純 JS 移植自 Go 版 crypto-signal/internal/ta)。
+// 技術指標(純 TS 移植自 Go 版 crypto-signal/internal/ta)。
 // 所有函式回傳與輸入等長的陣列,資料不足處以 NaN 填充,方便逐根對齊。
 
-function nanArray(n) {
+function nanArray(n: number): number[] {
   return new Array(n).fill(Number.NaN);
 }
 
-export function sma(v, p) {
+export function sma(v: number[], p: number): number[] {
   const out = nanArray(v.length);
   if (p <= 0 || v.length < p) return out;
   let sum = 0;
@@ -18,7 +18,7 @@ export function sma(v, p) {
 }
 
 // EMA;自動略過前面的 NaN(供 MACD 訊號線串接)。
-export function ema(v, p) {
+export function ema(v: number[], p: number): number[] {
   const out = nanArray(v.length);
   if (p <= 0) return out;
   let start = 0;
@@ -36,7 +36,7 @@ export function ema(v, p) {
   return out;
 }
 
-export function rsi(close, p) {
+export function rsi(close: number[], p: number): number[] {
   const out = nanArray(close.length);
   if (close.length < p + 1) return out;
   let gain = 0;
@@ -48,7 +48,7 @@ export function rsi(close, p) {
   }
   let avgGain = gain / p;
   let avgLoss = loss / p;
-  const calc = (ag, al) => (al === 0 ? 100 : 100 - 100 / (1 + ag / al));
+  const calc = (ag: number, al: number) => (al === 0 ? 100 : 100 - 100 / (1 + ag / al));
   out[p] = calc(avgGain, avgLoss);
   for (let i = p + 1; i < close.length; i++) {
     const ch = close[i] - close[i - 1];
@@ -61,7 +61,12 @@ export function rsi(close, p) {
   return out;
 }
 
-export function macd(close, fast, slow, signal) {
+export function macd(
+  close: number[],
+  fast: number,
+  slow: number,
+  signal: number,
+): { macd: number[]; signal: number[]; hist: number[] } {
   const emaFast = ema(close, fast);
   const emaSlow = ema(close, slow);
   const macdLine = nanArray(close.length);
@@ -80,7 +85,11 @@ export function macd(close, fast, slow, signal) {
   return { macd: macdLine, signal: sig, hist };
 }
 
-export function bollinger(close, p, mult) {
+export function bollinger(
+  close: number[],
+  p: number,
+  mult: number,
+): { mid: number[]; upper: number[]; lower: number[] } {
   const mid = sma(close, p);
   const upper = nanArray(close.length);
   const lower = nanArray(close.length);
@@ -98,11 +107,11 @@ export function bollinger(close, p, mult) {
   return { mid, upper, lower };
 }
 
-function trueRange(high, low, prevClose) {
+function trueRange(high: number, low: number, prevClose: number): number {
   return Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose));
 }
 
-export function atr(high, low, close, p) {
+export function atr(high: number[], low: number[], close: number[], p: number): number[] {
   const n = close.length;
   const out = nanArray(n);
   if (n < p + 1) return out;
@@ -119,7 +128,13 @@ export function atr(high, low, close, p) {
   return out;
 }
 
-export function stochastic(high, low, close, kPeriod, dPeriod) {
+export function stochastic(
+  high: number[],
+  low: number[],
+  close: number[],
+  kPeriod: number,
+  dPeriod: number,
+): { k: number[]; d: number[] } {
   const n = close.length;
   const k = nanArray(n);
   for (let i = kPeriod - 1; i < n; i++) {
@@ -135,7 +150,7 @@ export function stochastic(high, low, close, kPeriod, dPeriod) {
   return { k, d };
 }
 
-export function adx(high, low, close, p) {
+export function adx(high: number[], low: number[], close: number[], p: number): number[] {
   const n = close.length;
   const out = nanArray(n);
   if (n < 2 * p + 1) return out;
@@ -183,7 +198,7 @@ export function adx(high, low, close, p) {
   return out;
 }
 
-export function obv(close, volume) {
+export function obv(close: number[], volume: number[]): number[] {
   const n = close.length;
   const out = new Array(n).fill(0);
   for (let i = 1; i < n; i++) {

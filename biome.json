@@ -13,6 +13,6 @@
     }
   },
   "files": {
-    "includes": ["src/**/*.js"]
+    "includes": ["src/**/*.ts", "scripts/**/*.ts"]
   }
 }

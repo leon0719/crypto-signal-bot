@@ -2,10 +2,18 @@
 // 趨勢跟隨(EMA/MACD/OBV)+ 均值回歸(RSI/Stoch/BB)加權,並用 ADX 自動切換兩類權重。
 
 import * as ta from "./ta.js";
+import {
+  type Component,
+  type Config,
+  Direction,
+  type DirectionValue,
+  type Indicators,
+  type Kline,
+  type Regime,
+  type Result,
+} from "./types.js";
 
-export const Direction = { Long: "LONG", Short: "SHORT", Neutral: "NEUTRAL" };
-
-export function defaultConfig() {
+export function defaultConfig(): Config {
   return {
     emaFast: 12,
     emaSlow: 26,
@@ -31,7 +39,7 @@ export function defaultConfig() {
   };
 }
 
-export function minBars(cfg) {
+export function minBars(cfg: Config): number {
   return Math.max(
     cfg.emaMid,
     cfg.obvSlow,
@@ -42,8 +50,7 @@ export function minBars(cfg) {
   );
 }
 
-// klines: [{ openTime, open, high, low, close, volume }]
-export function build(klines, cfg) {
+export function build(klines: Kline[], cfg: Config): Indicators {
   const close = klines.map((k) => k.close);
   const high = klines.map((k) => k.high);
   const low = klines.map((k) => k.low);
@@ -74,10 +81,10 @@ export function build(klines, cfg) {
   };
 }
 
-const sign = (x) => (x > 0 ? 1 : x < 0 ? -1 : 0);
-const clamp = (x, lo, hi) => (x < lo ? lo : x > hi ? hi : x);
+const sign = (x: number): number => (x > 0 ? 1 : x < 0 ? -1 : 0);
+const clamp = (x: number, lo: number, hi: number): number => (x < lo ? lo : x > hi ? hi : x);
 
-export function evalAt(ind, i) {
+export function evalAt(ind: Indicators, i: number): Result | null {
   const c = ind.cfg;
   const required = [
     ind.emaFast[i],
@@ -98,7 +105,7 @@ export function evalAt(ind, i) {
   if (Number.isNaN(adx)) adx = 0;
   const { regime, trendMul, rangeMul } = regimeOf(c, adx);
 
-  const comps = [
+  const comps: Component[] = [
     mul(trendComp(ind, i), trendMul),
     mul(emaCrossComp(ind, i), trendMul),
     mul(macdComp(ind, i), trendMul),
@@ -116,7 +123,7 @@ export function evalAt(ind, i) {
   }
   const score = totalW > 0 ? (weighted / totalW) * 100 : 0;
 
-  let dir = Direction.Neutral;
+  let dir: DirectionValue = Direction.Neutral;
   if (score >= c.entryThreshold) dir = Direction.Long;
   else if (score <= -c.entryThreshold) dir = Direction.Short;
 
@@ -132,16 +139,16 @@ export function evalAt(ind, i) {
   };
 }
 
-function regimeOf(c, adx) {
+function regimeOf(c: Config, adx: number): { regime: Regime; trendMul: number; rangeMul: number } {
   if (!c.regimeSwitch || adx === 0) return { regime: "中性", trendMul: 1, rangeMul: 1 };
   if (adx >= c.adxTrendMin) return { regime: "趨勢", trendMul: 1.0, rangeMul: 0.3 };
   if (adx <= c.adxRangeMax) return { regime: "盤整", trendMul: 0.4, rangeMul: 1.0 };
   return { regime: "中性", trendMul: 1, rangeMul: 1 };
 }
 
-const mul = (comp, m) => ({ ...comp, weight: comp.weight * m });
+const mul = (comp: Component, m: number): Component => ({ ...comp, weight: comp.weight * m });
 
-function trendComp(ind, i) {
+function trendComp(ind: Indicators, i: number): Component {
   const close = ind.close[i];
   let longMA = ind.emaLong[i];
   if (Number.isNaN(longMA)) longMA = ind.emaMid[i];
@@ -150,7 +157,7 @@ function trendComp(ind, i) {
   return { name: "趨勢", value: val, weight: ind.cfg.weights.trend, note };
 }
 
-function emaCrossComp(ind, i) {
+function emaCrossComp(ind: Indicators, i: number): Component {
   const val = sign(ind.emaFast[i] - ind.emaSlow[i]);
   return {
     name: "EMA 快慢線",
@@ -160,7 +167,7 @@ function emaCrossComp(ind, i) {
   };
 }
 
-function macdComp(ind, i) {
+function macdComp(ind: Indicators, i: number): Component {
   const val = sign(ind.macdHist[i]);
   return {
     name: "MACD",
@@ -170,7 +177,7 @@ function macdComp(ind, i) {
   };
 }
 
-function obvComp(ind, i) {
+function obvComp(ind: Indicators, i: number): Component {
   const val = sign(ind.obvFast[i] - ind.obvSlow[i]);
   return {
     name: "OBV 量能",
@@ -180,21 +187,21 @@ function obvComp(ind, i) {
   };
 }
 
-function rsiComp(ind, i) {
+function rsiComp(ind: Indicators, i: number): Component {
   const r = ind.rsi[i];
   const val = clamp((50 - r) / 20, -1, 1);
   const note = r < 30 ? "超賣" : r > 70 ? "超買" : "中性";
   return { name: "RSI", value: val, weight: ind.cfg.weights.rsi, note };
 }
 
-function stochComp(ind, i) {
+function stochComp(ind: Indicators, i: number): Component {
   const k = ind.stochK[i];
   const val = clamp((50 - k) / 30, -1, 1);
   const note = k < 20 ? "超賣" : k > 80 ? "超買" : "中性";
   return { name: "Stochastic", value: val, weight: ind.cfg.weights.stoch, note };
 }
 
-function bbComp(ind, i) {
+function bbComp(ind: Indicators, i: number): Component {
   const up = ind.bbUpper[i];
   const low = ind.bbLower[i];
   const close = ind.close[i];

@@ -4,14 +4,14 @@ import { editDistance, suggestSymbols, toBase } from "./suggest.js";
 const SWAP_BASES = ["BTC", "ETH", "QTUM", "QNT", "QI", "DOGE", "DOT", "AAVE"];
 
 function mockInstruments() {
-  globalThis.fetch = mock(async (url) => {
+  globalThis.fetch = mock(async (url: string) => {
     if (url.includes("/public/instruments")) {
       return new Response(
         JSON.stringify({ code: "0", data: SWAP_BASES.map((b) => ({ instId: `${b}-USDT-SWAP` })) }),
       );
     }
     return new Response("not found", { status: 404 });
-  });
+  }) as unknown as typeof fetch;
 }
 
 afterEach(() => mock.restore());
@@ -35,8 +35,8 @@ describe("suggestSymbols", () => {
     mockInstruments();
     const out = await suggestSymbols("futures", "QAUSDT", 5);
     expect(out.length).toBeGreaterThan(0);
-    expect(out).toContain("QI"); // 距離 1
-    expect(out).toContain("QNT"); // 距離 2
+    expect(out).toContain("QI");
+    expect(out).toContain("QNT");
   });
 
   test("typo DOGEE → DOGE", async () => {
