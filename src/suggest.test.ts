@@ -1,7 +1,10 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { clearBasesCache } from "./okx.js";
 import { editDistance, suggestSymbols, toBase } from "./suggest.js";
 
 const SWAP_BASES = ["BTC", "ETH", "QTUM", "QNT", "QI", "DOGE", "DOT", "AAVE"];
+
+beforeEach(() => clearBasesCache()); // 清掉跨測試汙染的幣種快取
 
 function mockInstruments() {
   globalThis.fetch = mock(async (url: string) => {

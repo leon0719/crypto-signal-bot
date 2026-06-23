@@ -98,27 +98,35 @@ async function handleSingle(cmd: AnalyzeCommand): Promise<LineMessage[]> {
 // 多週期 carousel:同一幣別,多個週期各一張卡。
 async function handleMulti(cmd: AnalyzeCommand): Promise<LineMessage[]> {
   const cfg = defaultConfig();
-  const bubbles = await Promise.all(
+  const results = await Promise.all(
     MULTI_INTERVALS.map((iv) => buildBubbleFor({ ...cmd, interval: iv, multi: false }, cfg)),
   );
-  const valid = bubbles.filter((b): b is Flex => b !== null);
-  if (valid.length === 0) {
-    return [await notFoundMessage(cmd, new OkxError("51001", "instrument not found"))];
-  }
-  return [buildCarouselMessage(cmd.symbol, valid)];
+  const bubbles = results.map((r) => r.bubble).filter((b): b is Flex => b != null);
+  if (bubbles.length > 0) return [buildCarouselMessage(cmd.symbol, bubbles)];
+
+  // 全部失敗:只有「真的找不到代號」才做模糊推薦,否則是暫時性錯誤。
+  const notFound = results.some((r) => r.error instanceof OkxError && r.error.notFound);
+  if (notFound) return [await notFoundMessage(cmd, new OkxError("51001", "not found"))];
+  return [textMessage(`⚠️ ${cmd.symbol} 暫時取得失敗,請稍後再試。`, symbolQuickReply())];
 }
 
-async function buildBubbleFor(cmd: AnalyzeCommand, cfg: Config): Promise<Flex | null> {
+interface BubbleResult {
+  bubble: Flex | null;
+  error?: unknown;
+}
+
+async function buildBubbleFor(cmd: AnalyzeCommand, cfg: Config): Promise<BubbleResult> {
   try {
-    const klines = await fetchKlines(cmd.market, cmd.symbol, cmd.interval, ANALYSIS_LIMIT);
-    if (klines.length < minBars(cfg)) return null;
+    // carousel 用單頁(300 根)即可,降低並發避免 OKX 限流。
+    const klines = await fetchKlines(cmd.market, cmd.symbol, cmd.interval, 300);
+    if (klines.length < minBars(cfg)) return { bubble: null };
     const ind = build(klines, cfg);
     const res = evalAt(ind, ind.klines.length - 1);
-    if (!res) return null;
+    if (!res) return { bubble: null };
     const funding = cmd.market === "futures" ? await fetchFunding(cmd.symbol) : null;
-    return buildBubble(cmd, ind, res, funding);
-  } catch {
-    return null;
+    return { bubble: buildBubble(cmd, ind, res, funding) };
+  } catch (error) {
+    return { bubble: null, error };
   }
 }
 
