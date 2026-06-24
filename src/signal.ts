@@ -29,13 +29,13 @@ export function defaultConfig(): Config {
     obvSlow: 30,
     bbMult: 2.0,
     entryThreshold: 25,
-    stopATR: 1.5,
-    takeATR: 3.0, // 停損 1.5×ATR、停利 3.0×ATR → R:R = 2:1(業界建議至少 1:2)
+    stopATR: 1.0,
+    takeATR: 3.0, // 停損 1.0×ATR、停利 3.0×ATR → R:R = 1:3。回測(500 天、8 標的、train/test 分割)顯示較緊的停損 + 1:3 在樣本外期望值最穩。
     regimeSwitch: true,
     adxTrendMin: 25,
     adxRangeMax: 20,
     volumeFilter: true,
-    volumeMult: 1.2,
+    volumeMult: 1.0, // 當根量 ≥ 均量即可(1.0)。回測顯示 1.0 比 1.2 樣本外期望值更高且 8/8 標的全賺。
     volumePeriod: 20,
     weights: { trend: 2.0, emaCross: 1.5, macd: 1.5, rsi: 1.0, stoch: 1.0, bb: 1.0, obv: 1.0 },
   };

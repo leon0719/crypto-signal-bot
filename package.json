@@ -11,7 +11,10 @@
     "format": "biome check --write .",
     "lint": "biome lint .",
     "check": "biome check . && tsc --noEmit",
-    "richmenu": "bun scripts/setup-richmenu.ts"
+    "richmenu": "bun scripts/setup-richmenu.ts",
+    "backtest": "bun scripts/backtest.ts",
+    "sweep": "bun scripts/sweep.ts",
+    "optimize": "bun scripts/optimize.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",
