@@ -65,6 +65,67 @@ function kvRow(label: string, value: string, color: string = COLOR.text, weight 
 
 const separator = (): Flex => ({ type: "separator", margin: "md" });
 
+interface Plan {
+  entry: number;
+  zoneLo: number;
+  zoneHi: number;
+  levelName: string;
+  stop: number;
+  target: number;
+  lossPct: number;
+  winPct: number;
+  rr: number;
+}
+
+// 估「理想限價進場」:等回拉到最近的支撐(做多)/壓力(做空),沒有合適的就用 0.5×ATR 回拉。
+// 停損停利改以該理想進場價計算 —— 進得越好,風險越低。沒人能保證會回拉到,純技術參考。
+function entryPlan(ind: Indicators, res: Result, isLong: boolean): Plan {
+  const i = res.index;
+  const price = res.price;
+  const atr = res.atr;
+  const cfg = ind.cfg;
+
+  // 候選支撐/壓力:只取落在現價 1.2×ATR 內、且在進場方向正確一側的。
+  const cands: Array<[string, number]> = isLong
+    ? [
+        ["EMA12", ind.emaFast[i]],
+        ["EMA50", ind.emaMid[i]],
+        ["布林下軌", ind.bbLower[i]],
+      ]
+    : [
+        ["EMA12", ind.emaFast[i]],
+        ["EMA50", ind.emaMid[i]],
+        ["布林上軌", ind.bbUpper[i]],
+      ];
+  const inBand = cands.filter(([, v]) =>
+    isLong ? v < price && v >= price - 1.2 * atr : v > price && v <= price + 1.2 * atr,
+  );
+  inBand.sort((a, b) => Math.abs(price - a[1]) - Math.abs(price - b[1]));
+
+  const pull = isLong ? price - 0.5 * atr : price + 0.5 * atr;
+  const entry = inBand.length ? inBand[0][1] : pull;
+  const levelName = inBand.length
+    ? `${inBand[0][0]}（${isLong ? "支撐" : "壓力"}）`
+    : "回拉 0.5×ATR";
+
+  const band = 0.2 * atr;
+  const stop = isLong ? entry - cfg.stopATR * atr : entry + cfg.stopATR * atr;
+  const target = isLong ? entry + cfg.takeATR * atr : entry - cfg.takeATR * atr;
+  const lossPct = (Math.abs(stop - entry) / entry) * 100;
+  const winPct = (Math.abs(target - entry) / entry) * 100;
+  return {
+    entry,
+    zoneLo: entry - band,
+    zoneHi: entry + band,
+    levelName,
+    stop,
+    target,
+    lossPct,
+    winPct,
+    rr: winPct / lossPct,
+  };
+}
+
 // 組一張 bubble(單卡與 carousel 共用)。
 export function buildBubble(
   meta: AnalyzeCommand,
@@ -73,7 +134,6 @@ export function buildBubble(
   funding: number | null,
   htf?: HtfInfo,
 ): Flex {
-  const cfg = ind.cfg;
   const marketZh = meta.market === "spot" ? "現貨" : "合約";
   const accent = dirColor(res.direction);
   const body: Flex[] = [];
@@ -157,13 +217,7 @@ export function buildBubble(
     });
   } else {
     const isLong = effectiveDir === Direction.Long;
-    const px = res.price;
-    const atr = res.atr;
-    const stop = isLong ? px - cfg.stopATR * atr : px + cfg.stopATR * atr;
-    const target = isLong ? px + cfg.takeATR * atr : px - cfg.takeATR * atr;
-    const lossPct = (Math.abs(stop - px) / px) * 100;
-    const winPct = (Math.abs(target - px) / px) * 100;
-    const rr = winPct / lossPct;
+    const p = entryPlan(ind, res, isLong);
 
     body.push({
       type: "text",
@@ -173,14 +227,18 @@ export function buildBubble(
       color: COLOR.text,
       margin: "md",
     });
-    body.push(kvRow("進場", `~${fmtNum(px)}`));
-    body.push(kvRow("停損", `${fmtNum(stop)}  (-${lossPct.toFixed(1)}%)`, COLOR.short, "bold"));
-    body.push(kvRow("停利", `${fmtNum(target)}  (+${winPct.toFixed(1)}%)`, COLOR.long, "bold"));
-    body.push(kvRow("賺賠比", `${rr.toFixed(1)} : 1`));
+    // 理想限價(等回拉,進場價較佳)+ 市價追價(較差但保證進場)。
+    body.push(kvRow("理想進場", `${fmtNum(p.zoneLo)} ~ ${fmtNum(p.zoneHi)}`, COLOR.text, "bold"));
+    body.push(kvRow("　靠近", p.levelName));
+    body.push(kvRow("市價追價", `~${fmtNum(res.price)}`, COLOR.sub));
+    body.push(kvRow("停損", `${fmtNum(p.stop)}  (-${p.lossPct.toFixed(1)}%)`, COLOR.short, "bold"));
+    body.push(kvRow("停利", `${fmtNum(p.target)}  (+${p.winPct.toFixed(1)}%)`, COLOR.long, "bold"));
+    body.push(kvRow("賺賠比", `${p.rr.toFixed(1)} : 1`));
 
     if (meta.leverage > 1 && meta.market === "futures") {
       body.push(separator());
-      for (const row of leverageRows(meta.leverage, isLong, px, lossPct, winPct)) body.push(row);
+      for (const row of leverageRows(meta.leverage, isLong, p.entry, p.lossPct, p.winPct))
+        body.push(row);
     }
   }
 
