@@ -96,18 +96,25 @@ async function handleSingle(cmd: AnalyzeCommand): Promise<LineMessage[]> {
 }
 
 // 多週期 carousel:同一幣別,多個週期各一張卡。
+// 逐一抓(非並發)以降低 OKX 限流機率。
 async function handleMulti(cmd: AnalyzeCommand): Promise<LineMessage[]> {
   const cfg = defaultConfig();
-  const results = await Promise.all(
-    MULTI_INTERVALS.map((iv) => buildBubbleFor({ ...cmd, interval: iv, multi: false }, cfg)),
-  );
+  const results: BubbleResult[] = [];
+  for (const iv of MULTI_INTERVALS) {
+    results.push(await buildBubbleFor({ ...cmd, interval: iv, multi: false }, cfg));
+  }
   const bubbles = results.map((r) => r.bubble).filter((b): b is Flex => b != null);
   if (bubbles.length > 0) return [buildCarouselMessage(cmd.symbol, bubbles)];
 
-  // 全部失敗:只有「真的找不到代號」才做模糊推薦,否則是暫時性錯誤。
-  const notFound = results.some((r) => r.error instanceof OkxError && r.error.notFound);
-  if (notFound) return [await notFoundMessage(cmd, new OkxError("51001", "not found"))];
-  return [textMessage(`⚠️ ${cmd.symbol} 暫時取得失敗,請稍後再試。`, symbolQuickReply())];
+  // 全部失敗,分辨原因給對應訊息。
+  if (results.some((r) => r.error instanceof OkxError && r.error.notFound)) {
+    return [await notFoundMessage(cmd, new OkxError("51001", "not found"))];
+  }
+  if (results.some((r) => r.error)) {
+    return [textMessage(`⚠️ ${cmd.symbol} 暫時取得失敗,請稍後再試。`, symbolQuickReply())];
+  }
+  // 沒有錯誤但也沒卡片 = 資料根數不足(多為新上市/流動性低)。
+  return [textMessage(`⚠️ ${cmd.symbol} 歷史資料不足,無法分析(可能剛上市)。`, symbolQuickReply())];
 }
 
 interface BubbleResult {

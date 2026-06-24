@@ -26,23 +26,24 @@ export class OkxError extends Error {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const MAX_RETRY = 2; // 暫時性錯誤最多重試次數(遞增退避)
 
-// 統一的 OKX GET;對暫時性錯誤(網路、429、5xx)重試一次,避免並發爆量時偶發失敗。
+// 統一的 OKX GET;對暫時性錯誤(網路、429、5xx)重試,避免並發爆量時偶發失敗。
 // 注意:OKX 的業務錯誤(code !== "0",例如 51001 代號不存在)不重試,直接拋 OkxError。
 async function okxGet<T = unknown>(url: string, attempt = 0): Promise<OkxResponse<T>> {
   let res: Response;
   try {
     res = await fetch(url);
   } catch (err) {
-    if (attempt < 1) {
-      await sleep(300);
+    if (attempt < MAX_RETRY) {
+      await sleep(300 * (attempt + 1));
       return okxGet<T>(url, attempt + 1);
     }
     throw err;
   }
   if (!res.ok) {
-    if ((res.status === 429 || res.status >= 500) && attempt < 1) {
-      await sleep(300);
+    if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRY) {
+      await sleep(300 * (attempt + 1));
       return okxGet<T>(url, attempt + 1);
     }
     throw new Error(`OKX 回應 ${res.status}`);
