@@ -23,9 +23,6 @@ function mockFetch(trend: number) {
     if (url.includes("/market/candles")) {
       return new Response(JSON.stringify({ code: "0", msg: "", data: fakeOKXCandles(300, trend) }));
     }
-    if (url.includes("/funding-rate")) {
-      return new Response(JSON.stringify({ code: "0", data: [{ fundingRate: "0.0001" }] }));
-    }
     return new Response("not found", { status: 404 });
   }) as unknown as typeof fetch;
 }

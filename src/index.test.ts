@@ -56,8 +56,6 @@ describe("worker.fetch", () => {
     globalThis.fetch = mock(async (url: string, init?: RequestInit) => {
       if (url.includes("/market/candles"))
         return new Response(JSON.stringify({ code: "0", data: fakeCandles() }));
-      if (url.includes("/funding-rate"))
-        return new Response(JSON.stringify({ code: "0", data: [{ fundingRate: "0.0001" }] }));
       if (url.includes("/message/reply")) {
         replies.push(String(init?.body));
         return new Response("{}");

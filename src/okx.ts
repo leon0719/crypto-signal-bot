@@ -3,7 +3,6 @@
 import type { Kline, Market } from "./types.js";
 
 const CANDLES_URL = "https://www.okx.com/api/v5/market/candles";
-const FUNDING_URL = "https://www.okx.com/api/v5/public/funding-rate";
 const INSTRUMENTS_URL = "https://www.okx.com/api/v5/public/instruments";
 const MAX_CANDLES = 300; // OKX 單次上限,超過要翻頁
 
@@ -144,18 +143,4 @@ export async function fetchUsdtBases(market: Market, now = Date.now()): Promise<
   const bases = [...set];
   _basesCache.set(instType, { bases, ts: now });
   return bases;
-}
-
-// 回傳當前資金費率(小數),失敗回 null。
-export async function fetchFunding(symbol: string): Promise<number | null> {
-  try {
-    const inst = instId("futures", symbol);
-    const body = await okxGet<Array<{ fundingRate?: string }>>(
-      `${FUNDING_URL}?instId=${encodeURIComponent(inst)}`,
-    );
-    const rate = body?.data?.[0]?.fundingRate;
-    return rate != null ? Number(rate) : null;
-  } catch {
-    return null;
-  }
 }
