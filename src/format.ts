@@ -126,12 +126,24 @@ function entryPlan(ind: Indicators, res: Result, isLong: boolean): Plan {
   };
 }
 
+// 觀望時的說明:大週期牴觸 / 量能不足 / 多空分歧,擇一。
+function neutralNote(ind: Indicators, res: Result, htf?: HtfInfo): string {
+  if (htf?.conflict) return "📌 大週期方向相反,降級為觀望,不建議逆勢進場。";
+  const gatedByVolume =
+    Math.abs(res.score) >= ind.cfg.entryThreshold &&
+    !Number.isNaN(res.volRatio) &&
+    res.volRatio < ind.cfg.volumeMult;
+  if (gatedByVolume) {
+    return `📌 訊號偏${res.score > 0 ? "多" : "空"}但量能不足(${res.volRatio.toFixed(1)}× 均量),等放量再進場。`;
+  }
+  return "📌 多空分歧,建議觀望,等評分明確再進場。";
+}
+
 // 組一張 bubble(單卡與 carousel 共用)。
 export function buildBubble(
   meta: AnalyzeCommand,
   ind: Indicators,
   res: Result,
-  funding: number | null,
   htf?: HtfInfo,
 ): Flex {
   const marketZh = meta.market === "spot" ? "現貨" : "合約";
@@ -180,17 +192,6 @@ export function buildBubble(
   });
   body.push(kvRow("信心", conviction(res.score)));
   body.push(kvRow("市場狀態", `${res.regime}｜ADX ${res.adx.toFixed(0)}`));
-  if (!Number.isNaN(res.volRatio)) {
-    const low = res.volRatio < 1.2;
-    body.push(
-      kvRow(
-        "量能",
-        `${res.volRatio.toFixed(1)}× 均量${low ? "(偏弱)" : ""}`,
-        low ? COLOR.sub : COLOR.text,
-      ),
-    );
-  }
-  if (funding != null) body.push(kvRow("資金費率", `${(funding * 100).toFixed(4)}% / 8h`));
 
   // 多週期確認。
   if (htf) {
@@ -217,9 +218,7 @@ export function buildBubble(
   if (effectiveDir === Direction.Neutral) {
     body.push({
       type: "text",
-      text: htf?.conflict
-        ? "📌 大週期方向相反,降級為觀望,不建議逆勢進場。"
-        : "📌 多空分歧,建議觀望,等評分明確再進場。",
+      text: neutralNote(ind, res, htf),
       size: "sm",
       color: COLOR.text,
       wrap: true,
@@ -237,10 +236,9 @@ export function buildBubble(
       color: COLOR.text,
       margin: "md",
     });
-    // 理想限價(等回拉,進場價較佳)+ 市價追價(較差但保證進場)。
+    // 理想限價區(等回拉到支撐/壓力,進場價較佳;現價已顯示在最上方)。
     body.push(kvRow("理想進場", `${fmtNum(p.zoneLo)} ~ ${fmtNum(p.zoneHi)}`, COLOR.text, "bold"));
     body.push(kvRow("　靠近", p.levelName));
-    body.push(kvRow("市價追價", `~${fmtNum(res.price)}`, COLOR.sub));
     body.push(kvRow("停損", `${fmtNum(p.stop)}  (-${p.lossPct.toFixed(1)}%)`, COLOR.short, "bold"));
     body.push(kvRow("停利", `${fmtNum(p.target)}  (+${p.winPct.toFixed(1)}%)`, COLOR.long, "bold"));
     body.push(kvRow("賺賠比", `${p.rr.toFixed(1)} : 1`));
@@ -278,10 +276,9 @@ export function buildFlexMessage(
   meta: AnalyzeCommand,
   ind: Indicators,
   res: Result,
-  funding: number | null,
   htf?: HtfInfo,
 ): LineMessage {
-  const bubble = buildBubble(meta, ind, res, funding, htf);
+  const bubble = buildBubble(meta, ind, res, htf);
   const altText = `${meta.symbol} ${dirLabel(res.direction)} 評分${res.score.toFixed(0)} 價${fmtNum(res.price)}`;
   return {
     type: "flex",

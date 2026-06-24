@@ -9,7 +9,7 @@ import {
   symbolQuickReply,
 } from "./format.js";
 import { textMessage } from "./line.js";
-import { fetchFunding, fetchKlines, OkxError } from "./okx.js";
+import { fetchKlines, OkxError } from "./okx.js";
 import { build, defaultConfig, evalAt, minBars } from "./signal.js";
 import { suggestSymbols } from "./suggest.js";
 import {
@@ -50,9 +50,7 @@ export async function handleText(text: string): Promise<LineMessage[]> {
 
 async function handleSingle(cmd: AnalyzeCommand): Promise<LineMessage[]> {
   const cfg = defaultConfig();
-  // K 線、資金費率、大週期三者獨立,並行抓以省網路延遲。
-  const fundingPromise =
-    cmd.market === "futures" ? fetchFunding(cmd.symbol) : Promise.resolve(null);
+  // K 線與大週期確認獨立,並行抓以省網路延遲。
   const htfInterval = HTF_MAP[cmd.interval];
   const htfPromise = htfInterval
     ? evalHtfScore(cmd.market, cmd.symbol, htfInterval, cfg)
@@ -79,7 +77,6 @@ async function handleSingle(cmd: AnalyzeCommand): Promise<LineMessage[]> {
   const res = evalAt(ind, ind.klines.length - 1);
   if (!res) return [textMessage(`❌ ${cmd.symbol} 資料不足以計算指標,請改用較小週期。`)];
 
-  const funding = await fundingPromise;
   const htfScore = await htfPromise;
   const htf: HtfInfo | undefined =
     htfScore == null
@@ -92,7 +89,7 @@ async function handleSingle(cmd: AnalyzeCommand): Promise<LineMessage[]> {
             (res.direction === Direction.Short && htfScore > 0),
         };
 
-  return [buildFlexMessage(cmd, ind, res, funding, htf)];
+  return [buildFlexMessage(cmd, ind, res, htf)];
 }
 
 // 多週期 carousel:同一幣別,多個週期各一張卡。
@@ -130,8 +127,7 @@ async function buildBubbleFor(cmd: AnalyzeCommand, cfg: Config): Promise<BubbleR
     const ind = build(klines, cfg);
     const res = evalAt(ind, ind.klines.length - 1);
     if (!res) return { bubble: null };
-    const funding = cmd.market === "futures" ? await fetchFunding(cmd.symbol) : null;
-    return { bubble: buildBubble(cmd, ind, res, funding) };
+    return { bubble: buildBubble(cmd, ind, res) };
   } catch (error) {
     return { bubble: null, error };
   }
