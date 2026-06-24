@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **TypeScript + ESM, zero runtime dependencies** — indicators and LINE/OKX clients are hand-written against Web platform APIs (`fetch`, `crypto.subtle`, `btoa`) available in the Workers runtime. Do not add npm runtime deps without reason. Shared types live in `src/types.ts`; imports use `.js` specifiers (TS `verbatimModuleSyntax`).
 - Comments and all user-facing strings are **繁體中文**.
-- This is a JS port of the sibling Go CLI `../crypto-signal`. The indicator math (`ta.js`) and scoring (`signal.js`) mirror that implementation 1:1 — keep them in sync conceptually; don't "optimize" them into divergence.
+- The indicator math lives in `ta.ts` (pure, NaN-padded index-aligned arrays) and the scoring in `signal.ts` (weighted trend/mean-reversion families with an ADX regime switch). This is a self-contained TypeScript project — change them freely when the analysis can be improved; there is no external implementation to keep in sync with.
 
 ## Architecture
 

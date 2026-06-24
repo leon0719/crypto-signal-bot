@@ -1,5 +1,6 @@
 // 把分析結果格式化成 LINE Flex 圖卡 + quick reply。
 
+import * as ta from "./ta.js";
 import {
   type AnalyzeCommand,
   Direction,
@@ -25,6 +26,7 @@ const QR_MAX_ITEMS = 13; // LINE quick reply 上限
 const QR_MAX_LABEL = 20; // LINE 按鈕文字上限
 const ALT_TEXT_MAX = 400; // LINE flex altText 上限
 const INTERVALS = ["5m", "15m", "1h", "4h", "1d"];
+const SWING_SPAN = 2; // 轉折高低點:左右各 2 根確認
 
 function fmtNum(v: number): string {
   if (v >= 1000) return v.toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -78,7 +80,9 @@ interface Plan {
 }
 
 // 估「理想限價進場」:等回拉到最近的支撐(做多)/壓力(做空),沒有合適的就用 0.5×ATR 回拉。
-// 停損停利改以該理想進場價計算 —— 進得越好,風險越低。沒人能保證會回拉到,純技術參考。
+// 支撐/壓力候選同時納入動態均線(EMA/布林)與價格的轉折高低點(swing,真正反轉過的水平價位),
+// 多種方法重疊處(confluence)更可靠。停損停利改以該理想進場價計算 —— 進得越好,風險越低。
+// 沒人能保證會回拉到,純技術參考。
 function entryPlan(ind: Indicators, res: Result, isLong: boolean): Plan {
   const i = res.index;
   const price = res.price;
@@ -97,6 +101,15 @@ function entryPlan(ind: Indicators, res: Result, isLong: boolean): Plan {
         ["EMA50", ind.emaMid[i]],
         ["布林上軌", ind.bbUpper[i]],
       ];
+
+  // 價格轉折點:做多取前低(支撐)、做空取前高(壓力)。只掃到當前 K 線為止。
+  const { highs, lows } = ta.swingPoints(
+    ind.klines.slice(0, i + 1).map((k) => k.high),
+    ind.klines.slice(0, i + 1).map((k) => k.low),
+    SWING_SPAN,
+  );
+  for (const lv of isLong ? lows : highs) cands.push([isLong ? "前低" : "前高", lv]);
+
   const inBand = cands.filter(([, v]) =>
     isLong ? v < price && v >= price - 1.2 * atr : v > price && v <= price + 1.2 * atr,
   );
@@ -242,6 +255,17 @@ export function buildBubble(
     body.push(kvRow("停損", `${fmtNum(p.stop)}  (-${p.lossPct.toFixed(1)}%)`, COLOR.short, "bold"));
     body.push(kvRow("停利", `${fmtNum(p.target)}  (+${p.winPct.toFixed(1)}%)`, COLOR.long, "bold"));
     body.push(kvRow("賺賠比", `${p.rr.toFixed(1)} : 1`));
+
+    // 移動停損建議(無狀態,純文字提示):獲利達 1×ATR 後把停損移到成本價,先保本再放大。
+    const trailPct = (res.atr / p.entry) * 100;
+    body.push({
+      type: "text",
+      text: `🔒 移動停損:獲利達 +${trailPct.toFixed(1)}% 後,把停損移到成本價鎖住保本。`,
+      size: "xs",
+      color: COLOR.sub,
+      wrap: true,
+      margin: "sm",
+    });
 
     if (meta.leverage > 1 && meta.market === "futures") {
       body.push(separator());

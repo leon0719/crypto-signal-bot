@@ -1,4 +1,4 @@
-// 技術指標(純 TS 移植自 Go 版 crypto-signal/internal/ta)。
+// 技術指標(純 TS,against Web platform APIs)。
 // 所有函式回傳與輸入等長的陣列,資料不足處以 NaN 填充,方便逐根對齊。
 
 function nanArray(n: number): number[] {
@@ -196,6 +196,32 @@ export function adx(high: number[], low: number[], close: number[], p: number): 
     out[i] = val;
   }
   return out;
+}
+
+// 轉折高低點(fractal):某根 high 嚴格高於左右各 span 根 = swing high(壓力);
+// low 嚴格低於左右各 span 根 = swing low(支撐)。需右側 span 根確認,故最後 span 根不計。
+// 回傳的 levels 由舊到新排序;呼叫端通常取最接近現價的當支撐/壓力。
+export function swingPoints(
+  high: number[],
+  low: number[],
+  span: number,
+): { highs: number[]; lows: number[] } {
+  const n = high.length;
+  const highs: number[] = [];
+  const lows: number[] = [];
+  if (span < 1) return { highs, lows };
+  for (let i = span; i < n - span; i++) {
+    let isHigh = true;
+    let isLow = true;
+    for (let j = i - span; j <= i + span; j++) {
+      if (j === i) continue;
+      if (high[j] >= high[i]) isHigh = false;
+      if (low[j] <= low[i]) isLow = false;
+    }
+    if (isHigh) highs.push(high[i]);
+    if (isLow) lows.push(low[i]);
+  }
+  return { highs, lows };
 }
 
 export function obv(close: number[], volume: number[]): number[] {

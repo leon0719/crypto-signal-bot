@@ -1,6 +1,6 @@
 # crypto-signal-bot
 
-把 Go 版 `crypto-signal` 的技術分析邏輯改寫成 **JavaScript**,部署到 **Cloudflare Worker**,透過 **LINE webhook** 讓你在 LINE 官方帳號(OA)直接傳幣別、即時收到多空評分與進出場/槓桿建議。
+用 **TypeScript** 實作一套技術分析訊號引擎,部署到 **Cloudflare Worker**,透過 **LINE webhook** 讓你在 LINE 官方帳號(OA)直接傳幣別、即時收到多空評分與進出場/槓桿建議。
 
 > 純運算、無資料庫、無 LLM。你發訊息 → Worker 收 webhook → 回覆分析。指標僅供參考,非投資建議。
 
@@ -91,12 +91,9 @@ bun run check                    # biome + tsc 型別檢查
 
 本機放 `.dev.vars`,正式環境用 `wrangler secret put`。
 
-## 與 Go 版的關係
+## 分析方法
 
-指標與評分邏輯完全對齊 Go 版 `crypto-signal`(同樣的 EMA/MACD/RSI/BB/ATR/Stoch/ADX/OBV、ADX regime 切換、ATR 停損停利、槓桿強平檢查)。差別:
-
-- Go 版是 CLI,功能更全(回測、optimize/walk-forward、watch)。
-- JS 版是 LINE 互動,只做即時 `analyze`(回測類運算不適合放 webhook 即時回覆)。
+EMA/MACD/RSI/BB/ATR/Stoch/ADX/OBV 多指標加權,用 ADX 自動在「趨勢」與「盤整」兩套權重間切換;支撐/壓力同時參考動態均線(EMA/布林)與價格轉折高低點(swing);ATR 動態停損停利(1.5×/3.0×ATR,R:R 2:1)並附槓桿強平檢查。只做即時 `analyze`,不含回測。
 
 ## 限制
 

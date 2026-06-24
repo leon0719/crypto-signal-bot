@@ -1,5 +1,4 @@
-// 訊號評分(移植自 Go 版 crypto-signal/internal/signal)。
-// 趨勢跟隨(EMA/MACD/OBV)+ 均值回歸(RSI/Stoch/BB)加權,並用 ADX 自動切換兩類權重。
+// 訊號評分:趨勢跟隨(EMA/MACD/OBV)+ 均值回歸(RSI/Stoch/BB)加權,並用 ADX 自動切換兩類權重。
 
 import * as ta from "./ta.js";
 import {
@@ -31,7 +30,7 @@ export function defaultConfig(): Config {
     bbMult: 2.0,
     entryThreshold: 25,
     stopATR: 1.5,
-    takeATR: 2.5,
+    takeATR: 3.0, // 停損 1.5×ATR、停利 3.0×ATR → R:R = 2:1(業界建議至少 1:2)
     regimeSwitch: true,
     adxTrendMin: 25,
     adxRangeMax: 20,
@@ -156,7 +155,8 @@ export function evalAt(ind: Indicators, i: number): Result | null {
 
 function regimeOf(c: Config, adx: number): { regime: Regime; trendMul: number; rangeMul: number } {
   if (!c.regimeSwitch || adx === 0) return { regime: "中性", trendMul: 1, rangeMul: 1 };
-  if (adx >= c.adxTrendMin) return { regime: "趨勢", trendMul: 1.0, rangeMul: 0.3 };
+  // 強趨勢時幾乎停用均值回歸(RSI/Stoch/BB),避免超買/超賣在趨勢中持續輸出反向分數拖累評分。
+  if (adx >= c.adxTrendMin) return { regime: "趨勢", trendMul: 1.0, rangeMul: 0.15 };
   if (adx <= c.adxRangeMax) return { regime: "盤整", trendMul: 0.4, rangeMul: 1.0 };
   return { regime: "中性", trendMul: 1, rangeMul: 1 };
 }
