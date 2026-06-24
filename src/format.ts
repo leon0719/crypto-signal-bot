@@ -180,6 +180,16 @@ export function buildBubble(
   });
   body.push(kvRow("信心", conviction(res.score)));
   body.push(kvRow("市場狀態", `${res.regime}｜ADX ${res.adx.toFixed(0)}`));
+  if (!Number.isNaN(res.volRatio)) {
+    const low = res.volRatio < 1.2;
+    body.push(
+      kvRow(
+        "量能",
+        `${res.volRatio.toFixed(1)}× 均量${low ? "(偏弱)" : ""}`,
+        low ? COLOR.sub : COLOR.text,
+      ),
+    );
+  }
   if (funding != null) body.push(kvRow("資金費率", `${(funding * 100).toFixed(4)}% / 8h`));
 
   // 多週期確認。

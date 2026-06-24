@@ -12,7 +12,8 @@ function fakeOKXCandles(n: number, trend: number): string[][] {
     const high = Math.max(open, close) + 0.5;
     const low = Math.min(open, close) - 0.5;
     const ts = 1_700_000_000_000 + i * 3_600_000;
-    rows.push([String(ts), String(open), String(high), String(low), String(close), "1000"]);
+    const vol = i >= n - 2 ? "5000" : "1000"; // 末根放量,通過成交量過濾
+    rows.push([String(ts), String(open), String(high), String(low), String(close), vol]);
   }
   return rows.reverse();
 }

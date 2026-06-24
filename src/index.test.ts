@@ -24,14 +24,8 @@ function fakeCandles(): string[][] {
   let price = 100;
   for (let i = 0; i < 300; i++) {
     price += 0.5;
-    rows.push([
-      String(1_700_000_000_000 + i * 3_600_000),
-      "100",
-      "101",
-      "99",
-      String(price),
-      "1000",
-    ]);
+    const vol = i >= 298 ? "5000" : "1000"; // 末根放量,通過成交量過濾
+    rows.push([String(1_700_000_000_000 + i * 3_600_000), "100", "101", "99", String(price), vol]);
   }
   return rows.reverse();
 }

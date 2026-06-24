@@ -35,6 +35,9 @@ export function defaultConfig(): Config {
     regimeSwitch: true,
     adxTrendMin: 25,
     adxRangeMax: 20,
+    volumeFilter: true,
+    volumeMult: 1.2,
+    volumePeriod: 20,
     weights: { trend: 2.0, emaCross: 1.5, macd: 1.5, rsi: 1.0, stoch: 1.0, bb: 1.0, obv: 1.0 },
   };
 }
@@ -78,6 +81,7 @@ export function build(klines: Kline[], cfg: Config): Indicators {
     adx: ta.adx(high, low, close, cfg.adxPeriod),
     obvFast: ta.ema(obvSeries, cfg.obvFast),
     obvSlow: ta.ema(obvSeries, cfg.obvSlow),
+    volSMA: ta.sma(vol, cfg.volumePeriod),
   };
 }
 
@@ -127,6 +131,16 @@ export function evalAt(ind: Indicators, i: number): Result | null {
   if (score >= c.entryThreshold) dir = Direction.Long;
   else if (score <= -c.entryThreshold) dir = Direction.Short;
 
+  // 成交量過濾:有方向但當根量能不足(< 均量 × volumeMult)時,降級為觀望避免假突破。
+  let volRatio = Number.NaN;
+  const avgVol = ind.volSMA[i];
+  if (!Number.isNaN(avgVol) && avgVol > 0) {
+    volRatio = ind.klines[i].volume / avgVol;
+    if (c.volumeFilter && dir !== Direction.Neutral && volRatio < c.volumeMult) {
+      dir = Direction.Neutral;
+    }
+  }
+
   return {
     index: i,
     direction: dir,
@@ -136,6 +150,7 @@ export function evalAt(ind: Indicators, i: number): Result | null {
     atr: ind.atr[i],
     price: ind.close[i],
     regime,
+    volRatio,
   };
 }
 

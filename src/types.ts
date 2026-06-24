@@ -50,6 +50,9 @@ export interface Config {
   regimeSwitch: boolean;
   adxTrendMin: number;
   adxRangeMax: number;
+  volumeFilter: boolean; // 量能不足時不出訊號
+  volumeMult: number; // 當根量需 ≥ 均量 × 此倍數
+  volumePeriod: number; // 均量計算根數
   weights: Weights;
 }
 
@@ -70,6 +73,7 @@ export interface Indicators {
   adx: number[];
   obvFast: number[];
   obvSlow: number[];
+  volSMA: number[];
 }
 
 export type Regime = "趨勢" | "盤整" | "中性";
@@ -90,6 +94,7 @@ export interface Result {
   atr: number;
   price: number;
   regime: Regime;
+  volRatio: number; // 當根量 / 均量;NaN 表示未計算
 }
 
 // 解析後的指令。
