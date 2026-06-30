@@ -159,21 +159,25 @@ export function buildBubble(
   ind: Indicators,
   res: Result,
   htf?: HtfInfo,
+  livePrice?: number | null,
 ): Flex {
   const marketZh = meta.market === "spot" ? "現貨" : "合約";
   // 大週期牴觸時整張卡降級為觀望(方向、配色、規劃一致),不只降級規劃欄。
   const effectiveDir = htf?.conflict ? Direction.Neutral : res.direction;
   const accent = dirColor(effectiveDir);
+  // 訊號依「已收盤」K 棒(res.price);卡片頭顯示即時價,讓報價貼近市場。
+  const hasLive = livePrice != null && Number.isFinite(livePrice);
+  const displayPrice = hasLive ? (livePrice as number) : res.price;
   const body: Flex[] = [];
 
   body.push({
     type: "box",
     layout: "baseline",
     contents: [
-      { type: "text", text: "價格", size: "sm", color: COLOR.sub, flex: 2 },
+      { type: "text", text: hasLive ? "即時價" : "價格", size: "sm", color: COLOR.sub, flex: 2 },
       {
         type: "text",
-        text: fmtNum(res.price),
+        text: fmtNum(displayPrice),
         size: "xl",
         weight: "bold",
         color: COLOR.text,
@@ -182,6 +186,16 @@ export function buildBubble(
       },
     ],
   });
+
+  if (hasLive) {
+    body.push({
+      type: "text",
+      text: `訊號依 ${meta.interval} 收盤 ${fmtNum(res.price)}`,
+      size: "xxs",
+      color: COLOR.sub,
+      align: "end",
+    });
+  }
 
   body.push({
     type: "box",
@@ -305,10 +319,12 @@ export function buildFlexMessage(
   ind: Indicators,
   res: Result,
   htf?: HtfInfo,
+  livePrice?: number | null,
 ): LineMessage {
-  const bubble = buildBubble(meta, ind, res, htf);
+  const bubble = buildBubble(meta, ind, res, htf, livePrice);
   const effectiveDir = htf?.conflict ? Direction.Neutral : res.direction;
-  const altText = `${meta.symbol} ${dirLabel(effectiveDir)} 評分${res.score.toFixed(0)} 價${fmtNum(res.price)}`;
+  const shownPrice = livePrice != null && Number.isFinite(livePrice) ? livePrice : res.price;
+  const altText = `${meta.symbol} ${dirLabel(effectiveDir)} 評分${res.score.toFixed(0)} 價${fmtNum(shownPrice)}`;
   return {
     type: "flex",
     altText: altText.slice(0, ALT_TEXT_MAX),

@@ -58,6 +58,25 @@ describe("buildFlexMessage 大週期確認", () => {
     expect(blob).toContain("波段高點 − 2×ATR");
   });
 
+  test("有即時價 → 卡片顯示即時價 + 標註訊號依收盤價", () => {
+    const { ind, res } = longSetup();
+    const htf: HtfInfo = { interval: "1d", score: 40, conflict: false };
+    const live = res.price * 1.05; // 即時價與收盤價不同
+    const msg = asFlex(buildFlexMessage(meta, ind, res, htf, live));
+    const blob = JSON.stringify(msg.contents);
+    expect(blob).toContain("即時價");
+    expect(blob).toContain("訊號依 4h 收盤");
+  });
+
+  test("無即時價(null)→ 退回收盤價、標籤為「價格」", () => {
+    const { ind, res } = longSetup();
+    const htf: HtfInfo = { interval: "1d", score: 40, conflict: false };
+    const msg = asFlex(buildFlexMessage(meta, ind, res, htf, null));
+    const blob = JSON.stringify(msg.contents);
+    expect(blob).toContain("價格");
+    expect(blob).not.toContain("即時價");
+  });
+
   test("大週期牴觸 → 整張卡降級觀望(標題與 altText 不再顯示做多)", () => {
     const { ind, res } = longSetup();
     const htf: HtfInfo = { interval: "1d", score: -40, conflict: true };

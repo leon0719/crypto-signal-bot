@@ -3,7 +3,7 @@
 import { helpText, parseCommand } from "./command.js";
 import { buildFlexMessage, suggestionQuickReply, symbolQuickReply } from "./format.js";
 import { textMessage } from "./line.js";
-import { fetchKlines, OkxError } from "./okx.js";
+import { fetchKlines, fetchLastPrice, OkxError } from "./okx.js";
 import { build, defaultConfig, evalAt, minBars } from "./signal.js";
 import { suggestSymbols } from "./suggest.js";
 import {
@@ -41,11 +41,12 @@ export async function handleText(text: string): Promise<LineMessage[]> {
 
 async function handleSingle(cmd: AnalyzeCommand): Promise<LineMessage[]> {
   const cfg = defaultConfig();
-  // K 線與大週期確認獨立,並行抓以省網路延遲。
+  // K 線、大週期確認、即時價彼此獨立,並行抓以省網路延遲。
   const htfInterval = HTF_MAP[cmd.interval];
   const htfPromise = htfInterval
     ? evalHtfScore(cmd.market, cmd.symbol, htfInterval, cfg)
     : Promise.resolve(null);
+  const livePromise = fetchLastPrice(cmd.market, cmd.symbol);
 
   let klines: Awaited<ReturnType<typeof fetchKlines>>;
   try {
@@ -80,7 +81,8 @@ async function handleSingle(cmd: AnalyzeCommand): Promise<LineMessage[]> {
             (res.direction === Direction.Short && htfScore > 0),
         };
 
-  return [buildFlexMessage(cmd, ind, res, htf)];
+  const livePrice = await livePromise; // 即時價;失敗回 null,卡片退回收盤價
+  return [buildFlexMessage(cmd, ind, res, htf, livePrice)];
 }
 
 // 只取大週期的評分(供 MTF 確認),失敗回 null。
