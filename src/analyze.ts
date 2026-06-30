@@ -1,13 +1,7 @@
 // 串接:解析指令 → 抓 OKX K 線 → 算指標評分 → 產生 LINE 訊息陣列。
 
 import { helpText, parseCommand } from "./command.js";
-import {
-  buildBubble,
-  buildCarouselMessage,
-  buildFlexMessage,
-  suggestionQuickReply,
-  symbolQuickReply,
-} from "./format.js";
+import { buildFlexMessage, suggestionQuickReply, symbolQuickReply } from "./format.js";
 import { textMessage } from "./line.js";
 import { fetchKlines, OkxError } from "./okx.js";
 import { build, defaultConfig, evalAt, minBars } from "./signal.js";
@@ -16,14 +10,12 @@ import {
   type AnalyzeCommand,
   type Config,
   Direction,
-  type Flex,
   type HtfInfo,
   type LineMessage,
   type Market,
 } from "./types.js";
 
 const ANALYSIS_LIMIT = 400; // 多抓一些讓 EMA200 暖機更穩(會自動翻頁)
-const MULTI_INTERVALS = ["15m", "1h", "4h"];
 
 // 各週期對應的「大週期」確認。
 const HTF_MAP: Record<string, string> = {
@@ -44,7 +36,6 @@ const HTF_MAP: Record<string, string> = {
 export async function handleText(text: string): Promise<LineMessage[]> {
   const cmd = parseCommand(text);
   if (cmd.help) return [textMessage(helpText(), symbolQuickReply())];
-  if (cmd.multi) return handleMulti(cmd);
   return handleSingle(cmd);
 }
 
@@ -90,47 +81,6 @@ async function handleSingle(cmd: AnalyzeCommand): Promise<LineMessage[]> {
         };
 
   return [buildFlexMessage(cmd, ind, res, htf)];
-}
-
-// 多週期 carousel:同一幣別,多個週期各一張卡。
-// 逐一抓(非並發)以降低 OKX 限流機率。
-async function handleMulti(cmd: AnalyzeCommand): Promise<LineMessage[]> {
-  const cfg = defaultConfig();
-  const results: BubbleResult[] = [];
-  for (const iv of MULTI_INTERVALS) {
-    results.push(await buildBubbleFor({ ...cmd, interval: iv, multi: false }, cfg));
-  }
-  const bubbles = results.map((r) => r.bubble).filter((b): b is Flex => b != null);
-  if (bubbles.length > 0) return [buildCarouselMessage(cmd.symbol, bubbles)];
-
-  // 全部失敗,分辨原因給對應訊息。
-  if (results.some((r) => r.error instanceof OkxError && r.error.notFound)) {
-    return [await notFoundMessage(cmd, new OkxError("51001", "not found"))];
-  }
-  if (results.some((r) => r.error)) {
-    return [textMessage(`⚠️ ${cmd.symbol} 暫時取得失敗,請稍後再試。`, symbolQuickReply())];
-  }
-  // 沒有錯誤但也沒卡片 = 資料根數不足(多為新上市/流動性低)。
-  return [textMessage(`⚠️ ${cmd.symbol} 歷史資料不足,無法分析(可能剛上市)。`, symbolQuickReply())];
-}
-
-interface BubbleResult {
-  bubble: Flex | null;
-  error?: unknown;
-}
-
-async function buildBubbleFor(cmd: AnalyzeCommand, cfg: Config): Promise<BubbleResult> {
-  try {
-    // carousel 用單頁(300 根)即可,降低並發避免 OKX 限流。
-    const klines = await fetchKlines(cmd.market, cmd.symbol, cmd.interval, 300);
-    if (klines.length < minBars(cfg)) return { bubble: null };
-    const ind = build(klines, cfg);
-    const res = evalAt(ind, ind.klines.length - 1);
-    if (!res) return { bubble: null };
-    return { bubble: buildBubble(cmd, ind, res) };
-  } catch (error) {
-    return { bubble: null, error };
-  }
 }
 
 // 只取大週期的評分(供 MTF 確認),失敗回 null。

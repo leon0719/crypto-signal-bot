@@ -103,7 +103,6 @@ export interface HelpCommand {
 }
 export interface AnalyzeCommand {
   help: false;
-  multi: boolean; // 多週期 carousel
   symbol: string;
   interval: string;
   market: Market;

@@ -152,7 +152,7 @@ function neutralNote(ind: Indicators, res: Result, htf?: HtfInfo): string {
   return "📌 多空分歧,建議觀望,等評分明確再進場。";
 }
 
-// 組一張 bubble(單卡與 carousel 共用)。
+// 組一張 bubble(單卡內容)。
 export function buildBubble(
   meta: AnalyzeCommand,
   ind: Indicators,
@@ -160,7 +160,9 @@ export function buildBubble(
   htf?: HtfInfo,
 ): Flex {
   const marketZh = meta.market === "spot" ? "現貨" : "合約";
-  const accent = dirColor(res.direction);
+  // 大週期牴觸時整張卡降級為觀望(方向、配色、規劃一致),不只降級規劃欄。
+  const effectiveDir = htf?.conflict ? Direction.Neutral : res.direction;
+  const accent = dirColor(effectiveDir);
   const body: Flex[] = [];
 
   body.push({
@@ -187,7 +189,7 @@ export function buildBubble(
     contents: [
       {
         type: "text",
-        text: dirLabel(res.direction),
+        text: dirLabel(effectiveDir),
         size: "lg",
         weight: "bold",
         color: accent,
@@ -226,8 +228,6 @@ export function buildBubble(
   });
 
   body.push(separator());
-  // 大週期牴觸時降級為觀望。
-  const effectiveDir = htf?.conflict ? Direction.Neutral : res.direction;
   if (effectiveDir === Direction.Neutral) {
     body.push({
       type: "text",
@@ -303,22 +303,13 @@ export function buildFlexMessage(
   htf?: HtfInfo,
 ): LineMessage {
   const bubble = buildBubble(meta, ind, res, htf);
-  const altText = `${meta.symbol} ${dirLabel(res.direction)} 評分${res.score.toFixed(0)} 價${fmtNum(res.price)}`;
+  const effectiveDir = htf?.conflict ? Direction.Neutral : res.direction;
+  const altText = `${meta.symbol} ${dirLabel(effectiveDir)} 評分${res.score.toFixed(0)} 價${fmtNum(res.price)}`;
   return {
     type: "flex",
     altText: altText.slice(0, ALT_TEXT_MAX),
     contents: bubble,
     quickReply: intervalQuickReply(meta),
-  };
-}
-
-// 多週期 carousel 訊息。
-export function buildCarouselMessage(symbol: string, bubbles: Flex[]): LineMessage {
-  return {
-    type: "flex",
-    altText: `${symbol} 多週期分析`.slice(0, ALT_TEXT_MAX),
-    contents: { type: "carousel", contents: bubbles },
-    quickReply: symbolQuickReply(),
   };
 }
 
@@ -376,14 +367,13 @@ function marketSuffix(meta: AnalyzeCommand): string {
   return `${meta.market === "spot" ? " spot" : ""}${meta.leverage > 1 ? ` ${meta.leverage}x` : ""}`;
 }
 
-// 換週期按鈕 + 多週期捷徑,沿用原本市場別/槓桿。
+// 換週期按鈕,沿用原本市場別/槓桿。
 function intervalQuickReply(meta: AnalyzeCommand): QuickReply {
   const suffix = marketSuffix(meta);
   const pairs: Array<[string, string]> = INTERVALS.map((iv) => [
     iv,
     `${meta.symbol} ${iv}${suffix}`,
   ]);
-  pairs.push(["多週期", `${meta.symbol} multi${suffix}`]);
   return quickReply(pairs);
 }
 

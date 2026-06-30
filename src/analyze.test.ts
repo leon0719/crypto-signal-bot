@@ -41,7 +41,6 @@ describe("handleText", () => {
     expect(blob).toContain("槓桿 10×");
     const labels = msg.quickReply?.items.map((i) => i.action.label) ?? [];
     expect(labels).toContain("4h");
-    expect(labels).toContain("多週期");
   });
 
   test("下降趨勢 → 做空", async () => {
@@ -56,17 +55,7 @@ describe("handleText", () => {
     expect(JSON.stringify(msg)).not.toContain("非投資建議");
   });
 
-  test("multi → carousel(多張 bubble)", async () => {
-    mockFetch(0.6);
-    const [msg] = await handleText("btc multi");
-    expect(msg.type).toBe("flex");
-    const contents = (msg as unknown as { contents: { type: string; contents: unknown[] } })
-      .contents;
-    expect(contents.type).toBe("carousel");
-    expect(contents.contents.length).toBe(3);
-  });
-
-  test("multi 全失敗且代號不存在 → 模糊推薦", async () => {
+  test("代號不存在 → 模糊推薦", async () => {
     globalThis.fetch = mock(async (url: string) => {
       if (url.includes("/market/candles"))
         return new Response(JSON.stringify({ code: "51001", msg: "not exist", data: [] }));
@@ -74,18 +63,9 @@ describe("handleText", () => {
         return new Response(JSON.stringify({ code: "0", data: [{ instId: "NVDA-USDT-SWAP" }] }));
       return new Response("{}");
     }) as unknown as typeof fetch;
-    const [msg] = await handleText("nvdaa multi");
+    const [msg] = await handleText("nvdaa");
     expect(msg.type).toBe("text");
     expect((msg as { text: string }).text).toContain("你是不是要找");
-  });
-
-  test("multi 全失敗但暫時性錯誤 → 稍後再試(不誤報找不到)", async () => {
-    globalThis.fetch = mock(async (url: string) => {
-      if (url.includes("/market/candles")) return new Response("err", { status: 500 });
-      return new Response("{}");
-    }) as unknown as typeof fetch;
-    const [msg] = await handleText("btc multi");
-    expect((msg as { text: string }).text).toContain("暫時取得失敗");
   });
 
   test("help 回使用說明 + 幣別按鈕", async () => {

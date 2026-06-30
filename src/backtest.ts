@@ -38,6 +38,9 @@ export interface BacktestResult {
 export interface BacktestOptions {
   // 持倉中若出現「反向訊號」就平倉反手(預設 false,只靠停損/停利出場)。
   reverseOnSignal?: boolean;
+  // 進場前的外部過濾:回傳 false 則略過該訊號(例:大週期 MTF 不同向)。
+  // 參數為訊號方向與訊號所在的索引 i(進場為 i+1)。
+  entryFilter?: (direction: DirectionValue, signalIndex: number) => boolean;
 }
 
 export function backtest(klines: Kline[], cfg: Config, opts: BacktestOptions = {}): BacktestResult {
@@ -56,6 +59,13 @@ export function backtest(klines: Kline[], cfg: Config, opts: BacktestOptions = {
 
     // 訊號於第 i 根收盤確定 → 用第 i+1 根開盤進場。
     const dir = sig.direction;
+
+    // 外部過濾(如大週期確認):不通過則略過此訊號,往後再找。
+    if (opts.entryFilter && !opts.entryFilter(dir, i)) {
+      i++;
+      continue;
+    }
+
     const entryIndex = i + 1;
     const entryPrice = klines[entryIndex].open;
     const risk = cfg.stopATR * sig.atr;

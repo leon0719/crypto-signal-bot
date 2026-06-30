@@ -15,8 +15,57 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { backtest, summarize, type Trade } from "../src/backtest.js";
-import { defaultConfig } from "../src/signal.js";
-import type { Config, Kline } from "../src/types.js";
+import { build, defaultConfig, evalAt, minBars } from "../src/signal.js";
+import { type Config, Direction, type DirectionValue, type Kline } from "../src/types.js";
+
+// 各週期對應的大週期確認(與 src/analyze.ts 的 HTF_MAP 一致)。
+const HTF_MAP: Record<string, string> = {
+  "15m": "1h",
+  "30m": "2h",
+  "1h": "4h",
+  "2h": "12h",
+  "4h": "1d",
+  "1d": "1w",
+};
+
+function barMs(interval: string): number {
+  const n = Number(interval.slice(0, -1));
+  const unit = interval.slice(-1);
+  const u: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
+  return n * (u[unit] ?? 3_600_000);
+}
+
+// 把大週期評分嚴格對齊到 base 索引(只引用「在 base 收盤前已收盤」的大週期 K 棒,無前視)。
+// 回傳 entryFilter:大週期反向則略過(非衝突過濾,與卡片的「降級觀望」邏輯一致)。
+function htfEntryFilter(
+  base: Kline[],
+  htf: Kline[] | undefined,
+  baseInterval: string,
+  htfInterval: string | undefined,
+  cfg: Config,
+): ((dir: DirectionValue, i: number) => boolean) | undefined {
+  if (!htf || !htfInterval || htf.length < minBars(cfg)) return undefined;
+  const ind = build(htf, cfg);
+  const baseBar = barMs(baseInterval);
+  const htfBar = barMs(htfInterval);
+  const score: (number | null)[] = new Array(base.length).fill(null);
+  let j = 0;
+  let last: number | null = null;
+  for (let i = 0; i < base.length; i++) {
+    const baseClose = base[i].openTime + baseBar;
+    while (j < htf.length && htf[j].openTime + htfBar <= baseClose) {
+      const s = evalAt(ind, j);
+      if (s) last = s.score;
+      j++;
+    }
+    score[i] = last;
+  }
+  return (dir, i) => {
+    const s = score[i];
+    if (s == null) return true; // 大週期未知 → 不擋
+    return dir === Direction.Long ? s >= 0 : s <= 0; // 反向才擋
+  };
+}
 
 const SYMBOLS = [
   "BTCUSDT",
@@ -102,13 +151,28 @@ interface Agg {
   symbolCount: number;
 }
 
+interface Dataset {
+  symbol: string;
+  klines: Kline[];
+  htf?: Kline[]; // 對齊用的大週期(完整序列)
+}
+
+interface EvalOpts {
+  mtf: boolean; // 是否套用大週期確認過濾
+  baseInterval: string;
+  htfInterval?: string;
+}
+
 // 對一組資料(每個標的的某段 K 線)跑回測並彙總,附上跨標的穩健度。
-function evalConfig(data: { symbol: string; klines: Kline[] }[], cfg: Config): Agg {
+function evalConfig(data: Dataset[], cfg: Config, opts: EvalOpts): Agg {
   const all: Trade[] = [];
   let minPF = Number.POSITIVE_INFINITY;
   let profitable = 0;
-  for (const { klines } of data) {
-    const r = backtest(klines, cfg);
+  for (const d of data) {
+    const filter = opts.mtf
+      ? htfEntryFilter(d.klines, d.htf, opts.baseInterval, opts.htfInterval, cfg)
+      : undefined;
+    const r = backtest(d.klines, cfg, { entryFilter: filter });
     all.push(...r.trades);
     const pf = r.profitFactor;
     if (r.total >= 5) {
@@ -151,13 +215,20 @@ function split(klines: Kline[]): { train: Kline[]; test: Kline[] } {
 async function main(): Promise<void> {
   const [interval = "1h"] = process.argv.slice(2);
   const maxBars = interval.endsWith("m") ? 8000 : interval === "1h" ? 12000 : 3000;
+  const htfInterval = HTF_MAP[interval];
+  // 大週期所需根數:覆蓋 base 期間 + 暖機。
+  const htfMaxBars = htfInterval
+    ? Math.ceil((maxBars * barMs(interval)) / barMs(htfInterval)) + 300
+    : 0;
 
-  console.log(`載入歷史(${interval}, 每標的最多 ${maxBars} 根)…`);
-  const full: { symbol: string; klines: Kline[] }[] = [];
+  console.log(`載入歷史(${interval}, 每標的最多 ${maxBars} 根;大週期確認=${htfInterval ?? "無"})…`);
+  const full: Dataset[] = [];
   for (const symbol of SYMBOLS) {
     try {
       const klines = await loadKlines(symbol, interval, maxBars);
-      if (klines.length > 500) full.push({ symbol, klines });
+      if (klines.length <= 500) continue;
+      const htf = htfInterval ? await loadKlines(symbol, htfInterval, htfMaxBars) : undefined;
+      full.push({ symbol, klines, htf });
     } catch (e) {
       console.log(`  ${symbol} 失敗,略過:${e instanceof Error ? e.message : e}`);
     }
@@ -168,27 +239,36 @@ async function main(): Promise<void> {
     : "";
   console.log(`標的 ${full.length} 個,${full[0]?.klines.length ?? 0} 根/個,期間 ${span}\n`);
 
-  const train = full.map((d) => ({ symbol: d.symbol, klines: split(d.klines).train }));
-  const test = full.map((d) => ({ symbol: d.symbol, klines: split(d.klines).test }));
+  // train/test 切的是 base K 線;htf 保留完整序列(對齊靠時間戳,切片不影響正確性)。
+  const train: Dataset[] = full.map((d) => ({ ...d, klines: split(d.klines).train }));
+  const test: Dataset[] = full.map((d) => ({ ...d, klines: split(d.klines).test }));
+  const optBase: EvalOpts = { mtf: true, baseInterval: interval, htfInterval };
 
-  // 在訓練集評估、測試集驗證的小工具。
+  // 在訓練集評估、測試集驗證的小工具(預設已套用 MTF 過濾)。
   const show = (label: string, cfg: Config) => {
     console.log(`${label}`);
-    console.log(`    train ${fmt(evalConfig(train, cfg))}`);
-    console.log(`    test  ${fmt(evalConfig(test, cfg))}`);
+    console.log(`    train ${fmt(evalConfig(train, cfg, optBase))}`);
+    console.log(`    test  ${fmt(evalConfig(test, cfg, optBase))}`);
   };
 
   // 穩健度評分:以「測試集(樣本外)」為主,要求訓練集也為正(否則視為雜訊),
   // 再獎勵跨標的一致性。這才是我們真正想最大化的目標——不是 train 數字最漂亮。
   const robustScore = (cfg: Config): number => {
-    const tr = evalConfig(train, cfg);
-    const te = evalConfig(test, cfg);
+    const tr = evalConfig(train, cfg, optBase);
+    const te = evalConfig(test, cfg, optBase);
     if (tr.avgR <= 0 || te.total < 50) return -Infinity;
     return te.avgR * 100 + te.minSymbolPF * 5 + te.symbolsProfitable;
   };
 
   const base = defaultConfig();
-  console.log("【基準 defaultConfig】");
+  if (htfInterval) {
+    // 先量化 MTF 過濾本身的價值:同一參數,關閉 vs 開啟大週期確認。
+    console.log("【MTF 過濾價值對照(defaultConfig)】");
+    const off: EvalOpts = { ...optBase, mtf: false };
+    console.log(`  MTF off  test ${fmt(evalConfig(test, base, off))}`);
+    console.log(`  MTF on   test ${fmt(evalConfig(test, base, optBase))}`);
+  }
+  console.log("\n【基準 defaultConfig(已含 MTF)】");
   show("  baseline", base);
 
   // ── 階段 A:R:R(停損/停利距離)──────────────────────────

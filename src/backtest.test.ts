@@ -97,4 +97,23 @@ describe("backtest 整合", () => {
       expect(r.trades[k].entryIndex).toBeGreaterThan(r.trades[k - 1].exitIndex);
     }
   });
+
+  test("entryFilter 回 false 時全部略過 → 零交易", () => {
+    const r = backtest(uptrend(300), cfg, { entryFilter: () => false });
+    expect(r.total).toBe(0);
+  });
+
+  test("entryFilter 收到正確的方向與訊號索引", () => {
+    const seen: number[] = [];
+    const r = backtest(uptrend(300), cfg, {
+      entryFilter: (dir, i) => {
+        expect(dir).toBe(Direction.Long); // 純上漲只會有多單訊號
+        expect(i).toBeGreaterThanOrEqual(0);
+        seen.push(i);
+        return true; // 全放行 → 應與無 filter 同結果
+      },
+    });
+    expect(r.total).toBeGreaterThan(0);
+    expect(seen.length).toBeGreaterThanOrEqual(r.total);
+  });
 });
