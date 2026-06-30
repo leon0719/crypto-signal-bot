@@ -1,6 +1,6 @@
-// 幣種模糊查詢:代號打錯時推薦相近的 OKX 幣別。
+// 幣種模糊查詢:代號打錯時推薦相近的 Bybit 幣別。
 
-import { fetchUsdtBases } from "./okx.js";
+import { fetchUsdtBases } from "./bybit.js";
 import type { Market } from "./types.js";
 
 // 把 BTCUSDT / BTC-USDT 之類還原成 base(BTC)。

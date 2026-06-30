@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
-import { clearBasesCache } from "./okx.js";
+import { clearBasesCache } from "./bybit.js";
 import { editDistance, suggestSymbols, toBase } from "./suggest.js";
 
 const SWAP_BASES = ["BTC", "ETH", "QTUM", "QNT", "QI", "DOGE", "DOT", "AAVE"];
@@ -8,9 +8,15 @@ beforeEach(() => clearBasesCache()); // 清掉跨測試汙染的幣種快取
 
 function mockInstruments() {
   globalThis.fetch = mock(async (url: string) => {
-    if (url.includes("/public/instruments")) {
+    if (url.includes("/instruments-info")) {
       return new Response(
-        JSON.stringify({ code: "0", data: SWAP_BASES.map((b) => ({ instId: `${b}-USDT-SWAP` })) }),
+        JSON.stringify({
+          retCode: 0,
+          retMsg: "OK",
+          result: {
+            list: SWAP_BASES.map((b) => ({ baseCoin: b, quoteCoin: "USDT", status: "Trading" })),
+          },
+        }),
       );
     }
     return new Response("not found", { status: 404 });

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { handleText } from "./analyze.js";
 
-// 產生 OKX 格式的假 K 線(newest-first),trend 控制漲跌。
-function fakeOKXCandles(n: number, trend: number): string[][] {
+// 產生 Bybit 格式的假 K 線(newest-first):[start,o,h,l,c,vol,turnover],trend 控制漲跌。
+function fakeCandles(n: number, trend: number): string[][] {
   const rows: string[][] = [];
   let price = 100;
   for (let i = 0; i < n; i++) {
@@ -13,15 +13,17 @@ function fakeOKXCandles(n: number, trend: number): string[][] {
     const low = Math.min(open, close) - 0.5;
     const ts = 1_700_000_000_000 + i * 3_600_000;
     const vol = i >= n - 2 ? "5000" : "1000"; // 末根放量,通過成交量過濾
-    rows.push([String(ts), String(open), String(high), String(low), String(close), vol]);
+    rows.push([String(ts), String(open), String(high), String(low), String(close), vol, "0"]);
   }
   return rows.reverse();
 }
 
 function mockFetch(trend: number) {
   globalThis.fetch = mock(async (url: string) => {
-    if (url.includes("/market/candles")) {
-      return new Response(JSON.stringify({ code: "0", msg: "", data: fakeOKXCandles(300, trend) }));
+    if (url.includes("/market/kline")) {
+      return new Response(
+        JSON.stringify({ retCode: 0, retMsg: "OK", result: { list: fakeCandles(300, trend) } }),
+      );
     }
     return new Response("not found", { status: 404 });
   }) as unknown as typeof fetch;
@@ -57,10 +59,18 @@ describe("handleText", () => {
 
   test("代號不存在 → 模糊推薦", async () => {
     globalThis.fetch = mock(async (url: string) => {
-      if (url.includes("/market/candles"))
-        return new Response(JSON.stringify({ code: "51001", msg: "not exist", data: [] }));
-      if (url.includes("/public/instruments"))
-        return new Response(JSON.stringify({ code: "0", data: [{ instId: "NVDA-USDT-SWAP" }] }));
+      if (url.includes("/market/kline"))
+        return new Response(
+          JSON.stringify({ retCode: 10001, retMsg: "params error: symbol invalid", result: {} }),
+        );
+      if (url.includes("/instruments-info"))
+        return new Response(
+          JSON.stringify({
+            retCode: 0,
+            retMsg: "OK",
+            result: { list: [{ baseCoin: "NVDA", quoteCoin: "USDT", status: "Trading" }] },
+          }),
+        );
       return new Response("{}");
     }) as unknown as typeof fetch;
     const [msg] = await handleText("nvdaa");

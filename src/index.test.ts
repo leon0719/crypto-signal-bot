@@ -54,8 +54,10 @@ describe("worker.fetch", () => {
   test("有效訊息 → 200 且呼叫 LINE reply", async () => {
     const replies: string[] = [];
     globalThis.fetch = mock(async (url: string, init?: RequestInit) => {
-      if (url.includes("/market/candles"))
-        return new Response(JSON.stringify({ code: "0", data: fakeCandles() }));
+      if (url.includes("/market/kline"))
+        return new Response(
+          JSON.stringify({ retCode: 0, retMsg: "OK", result: { list: fakeCandles() } }),
+        );
       if (url.includes("/message/reply")) {
         replies.push(String(init?.body));
         return new Response("{}");

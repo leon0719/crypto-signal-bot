@@ -10,9 +10,15 @@ import {
   type Indicators,
   type LineMessage,
   type Market,
+  type OiInfo,
   type QuickReply,
   type Result,
 } from "./types.js";
+
+// 整張卡的有效方向:大週期或 OI 任一明確反向就降級為觀望(方向、配色、規劃一致)。
+function computeEffectiveDir(res: Result, htf?: HtfInfo, oi?: OiInfo): DirectionValue {
+  return htf?.conflict || oi?.conflict ? Direction.Neutral : res.direction;
+}
 
 const COLOR = {
   long: "#16a34a",
@@ -141,8 +147,9 @@ function entryPlan(ind: Indicators, res: Result, isLong: boolean): Plan {
 }
 
 // 觀望時的說明:大週期牴觸 / 量能不足 / 多空分歧,擇一。
-function neutralNote(ind: Indicators, res: Result, htf?: HtfInfo): string {
+function neutralNote(ind: Indicators, res: Result, htf?: HtfInfo, oi?: OiInfo): string {
   if (htf?.conflict) return "📌 大週期方向相反,降級為觀望,不建議逆勢進場。";
+  if (oi?.conflict) return "📌 未平倉量(OI)正往反向擴張,資金不挺此方向,降級為觀望。";
   const gatedByVolume =
     Math.abs(res.score) >= ind.cfg.entryThreshold &&
     !Number.isNaN(res.volRatio) &&
@@ -159,11 +166,12 @@ export function buildBubble(
   ind: Indicators,
   res: Result,
   htf?: HtfInfo,
+  oi?: OiInfo,
   livePrice?: number | null,
 ): Flex {
   const marketZh = meta.market === "spot" ? "現貨" : "合約";
-  // 大週期牴觸時整張卡降級為觀望(方向、配色、規劃一致),不只降級規劃欄。
-  const effectiveDir = htf?.conflict ? Direction.Neutral : res.direction;
+  // 大週期或 OI 牴觸時整張卡降級為觀望(方向、配色、規劃一致),不只降級規劃欄。
+  const effectiveDir = computeEffectiveDir(res, htf, oi);
   const accent = dirColor(effectiveDir);
   // 訊號依「已收盤」K 棒(res.price);卡片頭顯示即時價,讓報價貼近市場。
   const hasLive = livePrice != null && Number.isFinite(livePrice);
@@ -230,6 +238,13 @@ export function buildBubble(
     body.push(kvRow(label, value, htf.conflict ? COLOR.short : COLOR.long, "bold"));
   }
 
+  // OI 趨勢確認(回測驗證的「不反對」過濾:僅明確反向時降級)。
+  if (oi) {
+    const value = oi.conflict ? "資金反向 ✗" : oi.dir === 0 ? "資金收縮 ―" : "資金同向 ✓";
+    const color = oi.conflict ? COLOR.short : oi.dir === 0 ? COLOR.sub : COLOR.long;
+    body.push(kvRow("未平倉量(OI)", value, color, "bold"));
+  }
+
   body.push(separator());
   body.push({
     type: "text",
@@ -246,7 +261,7 @@ export function buildBubble(
   if (effectiveDir === Direction.Neutral) {
     body.push({
       type: "text",
-      text: neutralNote(ind, res, htf),
+      text: neutralNote(ind, res, htf, oi),
       size: "sm",
       color: COLOR.text,
       wrap: true,
@@ -303,7 +318,7 @@ export function buildBubble(
         { type: "text", text: meta.symbol, color: "#ffffff", weight: "bold", size: "lg" },
         {
           type: "text",
-          text: `OKX ${marketZh} · ${meta.interval}`,
+          text: `Bybit ${marketZh} · ${meta.interval}`,
           color: "#ffffffcc",
           size: "xs",
         },
@@ -319,10 +334,11 @@ export function buildFlexMessage(
   ind: Indicators,
   res: Result,
   htf?: HtfInfo,
+  oi?: OiInfo,
   livePrice?: number | null,
 ): LineMessage {
-  const bubble = buildBubble(meta, ind, res, htf, livePrice);
-  const effectiveDir = htf?.conflict ? Direction.Neutral : res.direction;
+  const bubble = buildBubble(meta, ind, res, htf, oi, livePrice);
+  const effectiveDir = computeEffectiveDir(res, htf, oi);
   const shownPrice = livePrice != null && Number.isFinite(livePrice) ? livePrice : res.price;
   const altText = `${meta.symbol} ${dirLabel(effectiveDir)} 評分${res.score.toFixed(0)} 價${fmtNum(shownPrice)}`;
   return {

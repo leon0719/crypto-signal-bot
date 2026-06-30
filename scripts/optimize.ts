@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// 策略參數優化:深抓歷史(history-candles,可達 ~500 天 1h),用 train/test 分割
+// 策略參數優化:深抓 Bybit 歷史(end 游標翻頁,可達數年),用 train/test 分割
 // 與「跨標的穩健度」分階段網格搜尋,挑出不易過擬合的設定。
 //
 // 用法:
@@ -15,6 +15,7 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { backtest, summarize, type Trade } from "../src/backtest.js";
+import { fetchKlines } from "../src/bybit.js";
 import { build, defaultConfig, evalAt, minBars } from "../src/signal.js";
 import { type Config, Direction, type DirectionValue, type Kline } from "../src/types.js";
 
@@ -77,53 +78,12 @@ const SYMBOLS = [
   "ADAUSDT",
   "AVAXUSDT",
 ];
-const HISTORY_URL = "https://www.okx.com/api/v5/market/history-candles";
 const CACHE_DIR =
   "/private/tmp/claude-501/-Users-riversoft-Desktop-workSpace-side-project-crypto-signal-bot/568f0caa-1339-45bf-915a-fb4dc5d76504/scratchpad/klines";
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-function instId(symbol: string): string {
-  return `${symbol.replace(/USDT$/, "")}-USDT-SWAP`;
-}
-function okxBar(interval: string): string {
-  const unit = interval[interval.length - 1];
-  return unit === "m" ? interval : interval.toUpperCase();
-}
-
-// 深抓歷史:用 after 往回翻頁(由新到舊),節流避免 50011。回傳由舊到新。
+// 深抓歷史:用 Bybit fetchKlines(end 游標翻頁,可回溯數年)。回傳由舊到新。
 async function fetchDeep(symbol: string, interval: string, maxBars: number): Promise<Kline[]> {
-  const inst = instId(symbol);
-  const bar = okxBar(interval);
-  const rows: string[][] = [];
-  let after: string | undefined;
-  while (rows.length < maxBars) {
-    let u = `${HISTORY_URL}?instId=${inst}&bar=${bar}&limit=100`;
-    if (after) u += `&after=${after}`;
-    const res = await fetch(u);
-    const body = (await res.json()) as { code: string; msg: string; data: string[][] };
-    if (body.code !== "0") {
-      if (body.code === "50011") {
-        await sleep(500);
-        continue;
-      }
-      throw new Error(`OKX ${body.code}: ${body.msg}`);
-    }
-    if (!body.data.length) break;
-    rows.push(...body.data);
-    after = body.data[body.data.length - 1][0];
-    await sleep(120);
-  }
-  return rows
-    .map((r) => ({
-      openTime: Number(r[0]),
-      open: Number(r[1]),
-      high: Number(r[2]),
-      low: Number(r[3]),
-      close: Number(r[4]),
-      volume: Number(r[5]),
-    }))
-    .sort((a, b) => a.openTime - b.openTime);
+  return fetchKlines("futures", symbol, interval, maxBars);
 }
 
 async function loadKlines(symbol: string, interval: string, maxBars: number): Promise<Kline[]> {

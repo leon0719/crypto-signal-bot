@@ -117,6 +117,12 @@ export interface HtfInfo {
   conflict: boolean;
 }
 
+// OI(未平倉量)趨勢確認結果。dir: -1/0/1;conflict = OI 明確與訊號方向相反(「不反對」過濾)。
+export interface OiInfo {
+  dir: number;
+  conflict: boolean;
+}
+
 // LINE 訊息(只用到 text / flex)。
 export type Flex = Record<string, unknown>;
 export interface QuickReplyItem {

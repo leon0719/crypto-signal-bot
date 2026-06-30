@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Conventions
 
-- **TypeScript + ESM, zero runtime dependencies** — indicators and LINE/OKX clients are hand-written against Web platform APIs (`fetch`, `crypto.subtle`, `btoa`) available in the Workers runtime. Do not add npm runtime deps without reason. Shared types live in `src/types.ts`; imports use `.js` specifiers (TS `verbatimModuleSyntax`).
+- **TypeScript + ESM, zero runtime dependencies** — indicators and LINE/Bybit clients are hand-written against Web platform APIs (`fetch`, `crypto.subtle`, `btoa`) available in the Workers runtime. Do not add npm runtime deps without reason. Shared types live in `src/types.ts`; imports use `.js` specifiers (TS `verbatimModuleSyntax`).
 - Comments and all user-facing strings are **繁體中文**.
 - The indicator math lives in `ta.ts` (pure, NaN-padded index-aligned arrays) and the scoring in `signal.ts` (weighted trend/mean-reversion families with an ADX regime switch). This is a self-contained TypeScript project — change them freely when the analysis can be improved; there is no external implementation to keep in sync with.
 
@@ -28,21 +28,22 @@ A single Cloudflare Worker that turns LINE text messages into crypto technical-a
 
 ### Analysis flow (`src/analyze.ts` is the orchestrator)
 
-`handleText(text)` → `parseCommand` (`command.ts`, returns a `Command` union: `{help}` or `{multi, symbol, interval, market, leverage}`; symbols get `USDT` appended, default futures/1h) → `fetchKlines` (`okx.ts`) → `build` then `evalAt` (`signal.ts`) → `buildFlexMessage` (`format.ts`). Returns an **array of LINE message objects** (not a string) — flex on success, text on help/error.
+`handleText(text)` → `parseCommand` (`command.ts`, returns a `Command` union: `{help}` or `{help: false, symbol, interval, market, leverage}`; symbols get `USDT` appended, default futures/4h) → `fetchKlines` (`bybit.ts`) → `build` then `evalAt` (`signal.ts`) → `buildFlexMessage` (`format.ts`). Returns an **array of LINE message objects** (not a string) — flex on success, text on help/error.
 
-Three independent fetches run **concurrently** in `handleSingle`: klines, funding rate, and the **higher-timeframe (MTF) score**. `HTF_MAP` maps each interval to a confirming larger one; if the big timeframe's score opposes the signal direction, the card downgrades the plan to 觀望 (`buildBubble` computes `effectiveDir` from `htf.conflict`). `multi` mode (`btc multi`) fans out `MULTI_INTERVALS` into a Flex **carousel** via `buildBubble` per interval.
+Three independent fetches run **concurrently** in `handleSingle`: the **higher-timeframe (MTF) score**, the **live price**, and the **OI (open-interest) trend** (`oi.ts` `evalOiDir`), all overlapping the main klines fetch. `HTF_MAP` maps each interval to a confirming larger one; if the big timeframe's score opposes the signal direction, the card downgrades to 觀望. The card shows **one bubble** per request (no carousel / multi mode).
 
 ### Key cross-file contracts
 
 - **Indicator arrays are NaN-padded and index-aligned** (`ta.js`): every indicator returns an array the same length as the input; leading positions are `NaN` until enough data exists. `signal.evalAt(ind, i)` reads index `i` from each and bails (returns `null`) if any required value is `NaN`. `signal.minBars(cfg)` is the minimum candle count for the last bar to be evaluable — used to produce the "資料不足" message.
 - **ADX regime switch** (`signal.js`): when `cfg.regimeSwitch`, ADX reweights the two indicator families — trending markets amplify trend-following (EMA/MACD/OBV) and suppress mean-reversion (RSI/Stoch/BB), and vice versa for ranging. This is why component weights in the output vary.
-- **Typed OKX errors** (`okx.js`): `okxGet()` wraps all OKX calls; an OKX error code throws `OkxError` with `.notFound` (code 51001 = instrument doesn't exist). `analyze.js` branches on `err.notFound` (never on error strings) to trigger fuzzy suggestions.
-- **Fuzzy symbol suggestions** (`suggest.js`): on `notFound`, `suggestSymbols` ranks the exchange's available USDT bases (prefix > user-typo-prefix > substring > same-first-letter edit-distance; different-first-letter is discarded as noise). The instrument list is cached per isolate (`okx.js` `fetchUsdtBases`, 10-min TTL) and only fetched on the error path.
+- **MTF + OI confirmation → 觀望 downgrade** (`oi.ts`, `format.ts`): two independent confirms can force the card to neutral. `format.ts` `computeEffectiveDir` returns 觀望 when **either** `htf.conflict` (big timeframe opposes) **or** `oi.conflict` is set. The OI rule is the backtest-validated "non-opposing" filter (`oi.ts` `oiDirSeries`: OI-EMA-expansion × price momentum → −1/0/+1; conflict only when OI **actively** opposes the signal). `evalOiDir` is fail-soft — any fetch error / unsupported interval returns `null` and the card simply omits OI. Deep-history backtest lives in `scripts/oi-backtest.ts`.
+- **Typed Bybit errors** (`bybit.ts`): `bybitGet()` wraps all Bybit calls; a Bybit business error (`retCode !== 0`) throws `BybitError` with `.notFound` (retCode 10001 = `params error: symbol invalid`, i.e. instrument doesn't exist). `analyze.ts` branches on `err.notFound` (never on error strings) to trigger fuzzy suggestions.
+- **Fuzzy symbol suggestions** (`suggest.js`): on `notFound`, `suggestSymbols` ranks the exchange's available USDT bases (prefix > user-typo-prefix > substring > same-first-letter edit-distance; different-first-letter is discarded as noise). The instrument list is cached per isolate (`bybit.ts` `fetchUsdtBases`, 10-min TTL) and only fetched on the error path.
 - **Quick replies** use LINE `message` actions whose `text` re-enters `handleText` (e.g. an interval button sends `"BTCUSDT 4h"`), preserving market/leverage via `marketSuffix`. Built through the single `quickReply(pairs)` helper in `format.js`.
 
 ### Testing model
 
-`bun:test`, no miniflare/wrangler runtime. Tests stub `globalThis.fetch` with `mock()` (route by URL substring — `/market/candles`, `/funding-rate`, `/public/instruments`, `/message/reply`, `/chat/loading/start`) and `mock.restore()` in `afterEach`. `index.test.ts` is the end-to-end check: it signs a body (via `sign()` re-exported from `line.test.ts`), calls `worker.fetch` with a fake `ExecutionContext` that collects `waitUntil` promises, then `await`s them and asserts a reply was POSTed. `bun test` and `tsc --noEmit` both run in CI (`.github/workflows/ci.yml`).
+`bun:test`, no miniflare/wrangler runtime. Tests stub `globalThis.fetch` with `mock()` (route by URL substring — `/market/kline`, `/market/tickers`, `/instruments-info`, `/message/reply`, `/chat/loading/start`) and `mock.restore()` in `afterEach`. `index.test.ts` is the end-to-end check: it signs a body (via `sign()` re-exported from `line.test.ts`), calls `worker.fetch` with a fake `ExecutionContext` that collects `waitUntil` promises, then `await`s them and asserts a reply was POSTed. `bun test` and `tsc --noEmit` both run in CI (`.github/workflows/ci.yml`).
 
 ## Deployment
 

@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { buildFlexMessage } from "./format.js";
 import { build, defaultConfig, evalAt } from "./signal.js";
-import { type AnalyzeCommand, Direction, type HtfInfo, type Kline, type Result } from "./types.js";
+import {
+  type AnalyzeCommand,
+  Direction,
+  type HtfInfo,
+  type Kline,
+  type OiInfo,
+  type Result,
+} from "./types.js";
 
 // 造一段穩定上升趨勢,讓末根產生明確做多訊號。
 function uptrend(n: number): Kline[] {
@@ -62,7 +69,7 @@ describe("buildFlexMessage 大週期確認", () => {
     const { ind, res } = longSetup();
     const htf: HtfInfo = { interval: "1d", score: 40, conflict: false };
     const live = res.price * 1.05; // 即時價與收盤價不同
-    const msg = asFlex(buildFlexMessage(meta, ind, res, htf, live));
+    const msg = asFlex(buildFlexMessage(meta, ind, res, htf, undefined, live));
     const blob = JSON.stringify(msg.contents);
     expect(blob).toContain("即時價");
     expect(blob).toContain("訊號依 4h 收盤");
@@ -71,7 +78,7 @@ describe("buildFlexMessage 大週期確認", () => {
   test("無即時價(null)→ 退回收盤價、標籤為「價格」", () => {
     const { ind, res } = longSetup();
     const htf: HtfInfo = { interval: "1d", score: 40, conflict: false };
-    const msg = asFlex(buildFlexMessage(meta, ind, res, htf, null));
+    const msg = asFlex(buildFlexMessage(meta, ind, res, htf, undefined, null));
     const blob = JSON.stringify(msg.contents);
     expect(blob).toContain("價格");
     expect(blob).not.toContain("即時價");
@@ -89,6 +96,29 @@ describe("buildFlexMessage 大週期確認", () => {
     expect(blob).toContain("方向牴觸 ✗");
     expect(blob).toContain("不建議逆勢進場");
     // 衝突時不應再出現交易規劃。
+    expect(blob).not.toContain("交易規劃");
+  });
+});
+
+describe("buildFlexMessage OI 確認", () => {
+  test("OI 同向 → 維持做多 + 顯示資金同向", () => {
+    const { ind, res } = longSetup();
+    const oi: OiInfo = { dir: 1, conflict: false };
+    const msg = asFlex(buildFlexMessage(meta, ind, res, undefined, oi));
+    expect(msg.altText).toContain("做多");
+    expect(JSON.stringify(msg.contents)).toContain("資金同向 ✓");
+  });
+
+  test("OI 反向 → 整張卡降級觀望", () => {
+    const { ind, res } = longSetup();
+    expect(res.direction).toBe(Direction.Long);
+    const oi: OiInfo = { dir: -1, conflict: true }; // OI 往反向擴張
+    const msg = asFlex(buildFlexMessage(meta, ind, res, undefined, oi));
+    expect(msg.altText).toContain("觀望");
+    expect(msg.altText).not.toContain("做多");
+    const blob = JSON.stringify(msg.contents);
+    expect(blob).toContain("資金反向 ✗");
+    expect(blob).toContain("OI");
     expect(blob).not.toContain("交易規劃");
   });
 });

@@ -1,15 +1,15 @@
 #!/usr/bin/env bun
-// 對真實 OKX 歷史資料跑回測,印出目前訊號的勝率/期望值。
+// 對真實 Bybit 歷史資料跑回測,印出目前訊號的勝率/期望值。
 //
 // 用法:
 //   bun run backtest BTCUSDT 1h            # 預設 futures、1000 根
 //   bun run backtest ETHUSDT 4h 2000       # 指定根數
 //   bun run backtest BTCUSDT 1h 1000 spot  # 指定市場
 //
-// 注意:這是離線分析腳本,不影響 Worker 執行;純讀 OKX 公開資料。
+// 注意:這是離線分析腳本,不影響 Worker 執行;純讀 Bybit 公開資料。
 
 import { type BacktestResult, backtest } from "../src/backtest.js";
-import { fetchKlines } from "../src/okx.js";
+import { fetchKlines } from "../src/bybit.js";
 import { defaultConfig } from "../src/signal.js";
 import type { Market } from "../src/types.js";
 

@@ -9,7 +9,7 @@
 // 多標的彙總可降低「單一幣過擬合」的風險:把所有交易合併後再算整體統計。
 
 import { backtest, summarize, type Trade } from "../src/backtest.js";
-import { fetchKlines } from "../src/okx.js";
+import { fetchKlines } from "../src/bybit.js";
 import { defaultConfig } from "../src/signal.js";
 import type { Kline } from "../src/types.js";
 

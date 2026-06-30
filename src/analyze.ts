@@ -1,9 +1,10 @@
-// 串接:解析指令 → 抓 OKX K 線 → 算指標評分 → 產生 LINE 訊息陣列。
+// 串接:解析指令 → 抓 Bybit K 線 → 算指標評分 → 產生 LINE 訊息陣列。
 
+import { BybitError, fetchKlines, fetchLastPrice } from "./bybit.js";
 import { helpText, parseCommand } from "./command.js";
 import { buildFlexMessage, suggestionQuickReply, symbolQuickReply } from "./format.js";
 import { textMessage } from "./line.js";
-import { fetchKlines, fetchLastPrice, OkxError } from "./okx.js";
+import { evalOiDir } from "./oi.js";
 import { build, defaultConfig, evalAt, minBars } from "./signal.js";
 import { suggestSymbols } from "./suggest.js";
 import {
@@ -13,6 +14,7 @@ import {
   type HtfInfo,
   type LineMessage,
   type Market,
+  type OiInfo,
 } from "./types.js";
 
 const ANALYSIS_LIMIT = 400; // 多抓一些讓 EMA200 暖機更穩(會自動翻頁)
@@ -69,6 +71,9 @@ async function handleSingle(cmd: AnalyzeCommand): Promise<LineMessage[]> {
   const res = evalAt(ind, ind.klines.length - 1);
   if (!res) return [textMessage(`❌ ${cmd.symbol} 資料不足以計算指標,請改用較小週期。`)];
 
+  // OI 趨勢確認:與 htf/即時價一樣獨立,並行抓(需用已收盤 K 線,故在此才啟動)。
+  const oiPromise = evalOiDir(cmd.symbol, cmd.interval, ind.klines);
+
   const htfScore = await htfPromise;
   const htf: HtfInfo | undefined =
     htfScore == null
@@ -81,8 +86,20 @@ async function handleSingle(cmd: AnalyzeCommand): Promise<LineMessage[]> {
             (res.direction === Direction.Short && htfScore > 0),
         };
 
+  // 回測驗證的「不反對」過濾:OI 明確反向才降級觀望(同 MTF conflict);失敗回 null 則不套用。
+  const oiDir = await oiPromise;
+  const oi: OiInfo | undefined =
+    oiDir == null
+      ? undefined
+      : {
+          dir: oiDir,
+          conflict:
+            (res.direction === Direction.Long && oiDir < 0) ||
+            (res.direction === Direction.Short && oiDir > 0),
+        };
+
   const livePrice = await livePromise; // 即時價;失敗回 null,卡片退回收盤價
-  return [buildFlexMessage(cmd, ind, res, htf, livePrice)];
+  return [buildFlexMessage(cmd, ind, res, htf, oi, livePrice)];
 }
 
 // 只取大週期的評分(供 MTF 確認),失敗回 null。
@@ -105,7 +122,7 @@ async function evalHtfScore(
 
 // 代號不存在時,推薦相近幣種。
 async function notFoundMessage(cmd: AnalyzeCommand, err: unknown): Promise<LineMessage> {
-  if (err instanceof OkxError && err.notFound) {
+  if (err instanceof BybitError && err.notFound) {
     const matches = await suggestSymbols(cmd.market, cmd.symbol, 5);
     if (matches.length > 0) {
       return textMessage(

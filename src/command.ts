@@ -54,6 +54,6 @@ export function helpText(): string {
     "・btc spot       (現貨)",
     "",
     "週期:主推 4h(預設)、1d;短於 1h 含成本偏負,不建議。",
-    "資料來源:OKX。",
+    "資料來源:Bybit。",
   ].join("\n");
 }
