@@ -51,7 +51,11 @@ describe("buildFlexMessage 大週期確認", () => {
     const htf: HtfInfo = { interval: "1d", score: 40, conflict: false };
     const msg = asFlex(buildFlexMessage(meta, ind, res, htf));
     expect(msg.altText).toContain("做多");
-    expect(JSON.stringify(msg.contents)).toContain("方向一致 ✓");
+    const blob = JSON.stringify(msg.contents);
+    expect(blob).toContain("方向一致 ✓");
+    // 出場指引改為 2×ATR 移動停損(做多 → 波段高點 − 2×ATR)。
+    expect(blob).toContain("移動停損");
+    expect(blob).toContain("波段高點 − 2×ATR");
   });
 
   test("大週期牴觸 → 整張卡降級觀望(標題與 altText 不再顯示做多)", () => {

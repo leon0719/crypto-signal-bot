@@ -41,6 +41,11 @@ export interface BacktestOptions {
   // 進場前的外部過濾:回傳 false 則略過該訊號(例:大週期 MTF 不同向)。
   // 參數為訊號方向與訊號所在的索引 i(進場為 i+1)。
   entryFilter?: (direction: DirectionValue, signalIndex: number) => boolean;
+  // 出場模式:
+  //  - "fixed"(預設):固定 takeATR 停利 + stopATR 停損。
+  //  - "trailing":無固定停利,停損隨波段高/低點以 trailATR×ATR 移動(讓贏單跟趨勢)。
+  exit?: "fixed" | "trailing";
+  trailATR?: number; // trailing 模式的移動距離(×ATR),預設 2。
 }
 
 export function backtest(klines: Kline[], cfg: Config, opts: BacktestOptions = {}): BacktestResult {
@@ -74,7 +79,18 @@ export function backtest(klines: Kline[], cfg: Config, opts: BacktestOptions = {
     const stop = isLong ? entryPrice - risk : entryPrice + risk;
     const take = isLong ? entryPrice + reward : entryPrice - reward;
 
-    const trade = simulateExit(klines, ind, entryIndex, dir, entryPrice, stop, take, risk, opts);
+    const trade = simulateExit(
+      klines,
+      ind,
+      entryIndex,
+      dir,
+      entryPrice,
+      stop,
+      take,
+      risk,
+      sig.atr,
+      opts,
+    );
     trades.push(trade);
 
     // 平倉後從出場那根之後再找下一個訊號(不重疊)。
@@ -94,18 +110,25 @@ function simulateExit(
   stop: number,
   take: number,
   risk: number,
+  atr: number,
   opts: BacktestOptions,
 ): Trade {
   const n = klines.length;
   const isLong = dir === Direction.Long;
+  const trailing = opts.exit === "trailing";
+  const trailDist = (opts.trailATR ?? 2) * atr;
+  // trailing:停損隨已收盤的波段高/低點移動;初始 = 固定停損。無固定停利。
+  let trail = stop;
+  let extreme = isLong ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
 
   for (let j = entryIndex; j < n; j++) {
     const bar = klines[j];
-    const hitStop = isLong ? bar.low <= stop : bar.high >= stop;
-    const hitTake = isLong ? bar.high >= take : bar.low <= take;
+    const activeStop = trailing ? trail : stop;
+    const hitStop = isLong ? bar.low <= activeStop : bar.high >= activeStop;
+    const hitTake = !trailing && (isLong ? bar.high >= take : bar.low <= take);
 
     // 同根同時觸及:保守假設先觸停損。
-    if (hitStop) return close(j, stop, "stop");
+    if (hitStop) return close(j, activeStop, "stop");
     if (hitTake) return close(j, take, "take");
 
     // 反手出場:持倉中若收盤訊號轉為反向,於下一根開盤平倉。
@@ -116,6 +139,13 @@ function simulateExit(
         ((isLong && s.direction === Direction.Short) ||
           (!isLong && s.direction === Direction.Long));
       if (reversed) return close(j + 1, klines[j + 1].open, "eod");
+    }
+
+    // 用「本根(已收盤)」的高/低更新移動停損,供下一根使用(不前視)。
+    if (trailing) {
+      extreme = isLong ? Math.max(extreme, bar.high) : Math.min(extreme, bar.low);
+      const next = isLong ? extreme - trailDist : extreme + trailDist;
+      trail = isLong ? Math.max(trail, next) : Math.min(trail, next);
     }
   }
 

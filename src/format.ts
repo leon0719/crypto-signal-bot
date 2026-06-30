@@ -256,11 +256,14 @@ export function buildBubble(
     body.push(kvRow("停利", `${fmtNum(p.target)}  (+${p.winPct.toFixed(1)}%)`, COLOR.long, "bold"));
     body.push(kvRow("賺賠比", `${p.rr.toFixed(1)} : 1`));
 
-    // 移動停損建議(無狀態,純文字提示):獲利達 1×ATR 後把停損移到成本價,先保本再放大。
-    const trailPct = (res.atr / p.entry) * 100;
+    // 移動停損建議(無狀態,純文字提示):回測顯示「2×ATR 移動停損」優於固定停利——
+    // 順勢策略靠少數大波段獲利,別在固定停利就全出,讓贏單跟著趨勢跑。
+    const trailPct = ((2 * res.atr) / p.entry) * 100;
+    const trailAnchor = isLong ? "波段高點 − 2×ATR" : "波段低點 + 2×ATR";
+    const trailDir = isLong ? "上移" : "下移";
     body.push({
       type: "text",
-      text: `🔒 移動停損:獲利達 +${trailPct.toFixed(1)}% 後,把停損移到成本價鎖住保本。`,
+      text: `🔒 移動停損(建議):停損改掛「${trailAnchor}(約 ${trailPct.toFixed(1)}%)」,隨新${isLong ? "高" : "低"}${trailDir};別在上方停利就全出,讓利潤奔跑。`,
       size: "xs",
       color: COLOR.sub,
       wrap: true,

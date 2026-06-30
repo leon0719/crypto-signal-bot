@@ -103,6 +103,31 @@ describe("backtest 整合", () => {
     expect(r.total).toBe(0);
   });
 
+  test("trailing 出場:上升趨勢仍只做多、無前視且出場價合理", () => {
+    const kl = uptrend(300);
+    const r = backtest(kl, cfg, { exit: "trailing", trailATR: 2 });
+    expect(r.total).toBeGreaterThan(0);
+    for (const t of r.trades) {
+      expect(t.direction).toBe(Direction.Long);
+      expect(t.entryPrice).toBe(kl[t.entryIndex].open);
+      // trailing 無固定停利,出場只會是移動停損(stop)或資料用盡(eod)。
+      expect(["stop", "eod"]).toContain(t.reason);
+      // 多單出場價不可高於進場後出現過的最高價(出場價是被回落的停損掃到)。
+      expect(t.exitPrice).toBeLessThanOrEqual(
+        Math.max(...kl.slice(t.entryIndex, t.exitIndex + 1).map((k) => k.high)) + 1e-9,
+      );
+    }
+    // 持續上漲時,移動停損讓贏單續抱 → 應為正期望。
+    expect(r.avgR).toBeGreaterThan(0);
+  });
+
+  test("trailing 讓贏單跑得更遠:平均持倉根數 > 固定停利", () => {
+    const kl = uptrend(300);
+    const fixed = backtest(kl, cfg);
+    const trail = backtest(kl, cfg, { exit: "trailing", trailATR: 2 });
+    expect(trail.avgBarsHeld).toBeGreaterThan(fixed.avgBarsHeld);
+  });
+
   test("entryFilter 收到正確的方向與訊號索引", () => {
     const seen: number[] = [];
     const r = backtest(uptrend(300), cfg, {
