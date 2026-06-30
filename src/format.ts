@@ -25,7 +25,8 @@ const COLOR = {
 const QR_MAX_ITEMS = 13; // LINE quick reply 上限
 const QR_MAX_LABEL = 20; // LINE 按鈕文字上限
 const ALT_TEXT_MAX = 400; // LINE flex altText 上限
-const INTERVALS = ["5m", "15m", "1h", "4h", "1d"];
+// 只列有正期望的週期:回測顯示 1h 及更短含成本為負期望,故快速鍵僅留 4h(主)與 1d(參考)。
+const INTERVALS = ["4h", "1d"];
 const SWING_SPAN = 2; // 轉折高低點:左右各 2 根確認
 
 function fmtNum(v: number): string {

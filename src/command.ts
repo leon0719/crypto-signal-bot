@@ -49,11 +49,11 @@ export function helpText(): string {
     "",
     "直接輸入幣別即可分析,例如:",
     "・btc            (BTCUSDT 4h 合約)",
-    "・eth 1h         (換週期)",
-    "・sol 15m 10x    (加槓桿,推算強平)",
+    "・eth 1d         (換週期)",
+    "・sol 4h 10x     (加槓桿,推算強平)",
     "・btc spot       (現貨)",
     "",
-    "週期:1m 5m 15m 1h 4h 1d 1w",
+    "週期:主推 4h(預設)、1d;短於 1h 含成本偏負,不建議。",
     "資料來源:OKX。",
   ].join("\n");
 }
