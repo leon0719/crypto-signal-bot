@@ -75,3 +75,56 @@ describe("build 回傳 high/low 陣列", () => {
     expect(ind.low[10]).toBe(kl[10].low);
   });
 });
+
+describe("均線斜率降權(slopeFilter)", () => {
+  // 先長跌再急彈:彈升段趨勢族偏多、但 emaLong 斜率仍向下 → 應降權。
+  function downThenBounce(): Kline[] {
+    const kl: Kline[] = [];
+    let price = 300;
+    for (let i = 0; i < 220; i++) {
+      const open = price;
+      price *= 0.99;
+      const close = price;
+      kl.push({
+        openTime: i * 3600_000,
+        open,
+        high: Math.max(open, close) * 1.002,
+        low: Math.min(open, close) * 0.998,
+        close,
+        volume: 1000 + i,
+      });
+    }
+    for (let i = 0; i < 40; i++) {
+      const open = price;
+      price *= 1.02;
+      const close = price;
+      kl.push({
+        openTime: (220 + i) * 3600_000,
+        open,
+        high: Math.max(open, close) * 1.002,
+        low: Math.min(open, close) * 0.998,
+        close,
+        volume: 2000 + i,
+      });
+    }
+    return kl;
+  }
+
+  test("對齊(純上升)時開關不改變分數", () => {
+    const kl = uptrend(260);
+    const off = build(kl, defaultConfig());
+    const on = build(kl, { ...defaultConfig(), slopeFilter: true });
+    const i = kl.length - 1;
+    expect(evalAt(on, i)?.score).toBeCloseTo(evalAt(off, i)?.score ?? 0, 6);
+  });
+
+  test("逆斜率(彈升但長均線下彎)時分數絕對值下降", () => {
+    const kl = downThenBounce();
+    const i = kl.length - 1;
+    const off = evalAt(build(kl, defaultConfig()), i);
+    const on = evalAt(build(kl, { ...defaultConfig(), slopeFilter: true }), i);
+    expect(off).not.toBeNull();
+    expect(on).not.toBeNull();
+    expect(Math.abs(on?.score ?? 0)).toBeLessThan(Math.abs(off?.score ?? 0));
+  });
+});

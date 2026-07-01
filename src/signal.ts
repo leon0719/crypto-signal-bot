@@ -135,8 +135,16 @@ export function evalAt(ind: Indicators, i: number): Result | null {
   const rangeRaw: Component[] = [rsiComp(ind, i), stochComp(ind, i), bbComp(ind, i)];
   if (c.shadowComp) rangeRaw.push(shadowComp(ind, i));
 
+  // 均線斜率降權:趨勢族淨方向與長期均線斜率相反時,把趨勢族權重打折(不降級)。
+  let slopeMul = 1;
+  if (c.slopeFilter) {
+    const ss = ta.slopeSign(ind.emaLong, i, c.slopeLookback);
+    const trendNet = sign(trendRaw.reduce((a, cp) => a + cp.value * cp.weight, 0));
+    if (ss !== 0 && trendNet !== 0 && trendNet !== ss) slopeMul = c.slopeDiscount;
+  }
+
   const comps: Component[] = [
-    ...trendRaw.map((cp) => mul(cp, trendMul)),
+    ...trendRaw.map((cp) => mul(cp, trendMul * slopeMul)),
     ...rangeRaw.map((cp) => mul(cp, rangeMul)),
   ];
 
