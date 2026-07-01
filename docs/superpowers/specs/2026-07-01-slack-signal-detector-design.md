@@ -11,7 +11,7 @@
 
 ## 需求彙整(已與使用者確認)
 
-- **執行環境**:本機 Docker 容器,常駐(方案 A:容器內 supercronic 排程)。
+- **執行環境**:本機 Docker 容器,常駐(純 bun 排程器 `scripts/scheduler.ts`;原 supercronic 因容器 fork/exec 相容問題改棄)。
 - **頻率**:對齊 4h K 棒收盤(00/04/08/12/16/20 UTC),收棒後約 2 分鐘跑一次。理由:引擎主訊號用**已收盤 4h 棒**計算,新訊號只在 4h 收盤時才可能出現,掃得更密不會有新結果。
 - **偵測範圍**:重用 `scripts/scan-market.ts` 的 `SYMBOLS`(15 個主流幣)、`INTERVAL=4h`、`HTF=1d`。
 - **觸發條件**:有效方向(LONG/SHORT)且**新出現**才推;同幣同方向不重推,直到訊號消失才重置。
@@ -102,10 +102,12 @@ export async function postMessage(text: string): Promise<void>;
   - 做多:停損 = price − 2×ATR;目標 = price + 3×ATR。
 - 綠/紅 emoji 依方向(做多 🟢 / 做空 🔴)。
 
-### Docker(方案 A:supercronic 常駐)
+### Docker(純 bun 常駐排程器)
 
-- **`Dockerfile`**:`oven/bun` base;下載 supercronic 靜態 binary(釘住版本 + checksum);複製原始碼;`bun install --frozen-lockfile`;`CMD ["supercronic", "/app/crontab"]`。
-- **`crontab`**:`2 0,4,8,12,16,20 * * * cd /app && bun scripts/detect.ts`(UTC)。
+> 註:原設計用 supercronic 排程,但其 arm64 binary 在本機 colima 容器有 fork/exec 相容問題(啟動 reaper 即 fatal),已改用純 bun 排程器 `scripts/scheduler.ts`(對齊 4h,UTC),更貼合專案零外部相依精神。排程時點計算抽為純函式 `src/schedule.ts`(`nextRunTime`)並單元測試。
+
+- **`Dockerfile`**:`oven/bun` base;複製原始碼;`bun install --frozen-lockfile`;`CMD ["bun", "scripts/scheduler.ts"]`。
+- **`scripts/scheduler.ts`**:迴圈計算下一個「UTC 4h + 2 分」時點 → `Bun.sleep` → 以子行程跑 `scripts/detect.ts`(失敗不拖垮排程器)。`SCAN_EVERY_SECONDS` 環境變數可切「每 N 秒」測試模式。
 - **`docker-compose.yml`**:`build .`、`env_file: .env`、`volumes: ["./data:/app/data"]`、`restart: unless-stopped`。
 - **`.env`(gitignore)**:`SLACK_BOT_TOKEN=...`、`SLACK_CHANNEL_ID=C0BEBHYB56E`。
 - **`.env.example`(進 git)**:同上但值留空,當範本。
@@ -116,7 +118,7 @@ export async function postMessage(text: string): Promise<void>;
 - 單一幣 fetch 失敗:引擎/`runScan` 內 fail-soft,跳過該幣(現有行為)。
 - Slack 發送失敗:log 記錄錯誤,不中斷流程。
 - 整輪掃描全數失敗(0 rows):log 警示;預設**不**發 Slack 錯誤訊息(避免噪音),此為明確取捨,日後可加開關。
-- supercronic:`restart: unless-stopped` 確保容器重啟後排程續跑;錯過的 4h 棒因「新出現才推」語意會在下次執行時補推當前仍有效的機會。
+- 排程器:`restart: unless-stopped` 確保容器重啟後排程續跑;錯過的 4h 棒因「新出現才推」語意會在下次執行時補推當前仍有效的機會。
 
 ## 測試(沿用現有 stub fetch 模型)
 

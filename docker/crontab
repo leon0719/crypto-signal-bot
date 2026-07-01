@@ -1,2 +1,0 @@
-# 每 4h 收棒後 2 分鐘掃描一次(UTC)
-2 0,4,8,12,16,20 * * * cd /app && bun scripts/detect.ts
