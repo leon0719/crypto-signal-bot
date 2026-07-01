@@ -37,7 +37,23 @@ export function defaultConfig(): Config {
     volumeFilter: true,
     volumeMult: 1.0, // 當根量 ≥ 均量即可(1.0)。回測顯示 1.0 比 1.2 樣本外期望值更高且 8/8 標的全賺。
     volumePeriod: 20,
-    weights: { trend: 2.0, emaCross: 1.5, macd: 1.5, rsi: 1.0, stoch: 1.0, bb: 1.0, obv: 1.0 },
+    srFilter: false,
+    srSpan: 5,
+    srBufferATR: 0.5,
+    slopeFilter: false,
+    slopeLookback: 5,
+    slopeDiscount: 0.5,
+    shadowComp: false,
+    weights: {
+      trend: 2.0,
+      emaCross: 1.5,
+      macd: 1.5,
+      rsi: 1.0,
+      stoch: 1.0,
+      bb: 1.0,
+      obv: 1.0,
+      shadow: 0.5,
+    },
   };
 }
 
@@ -67,6 +83,8 @@ export function build(klines: Kline[], cfg: Config): Indicators {
     cfg,
     klines,
     close,
+    high,
+    low,
     emaFast: ta.ema(close, cfg.emaFast),
     emaSlow: ta.ema(close, cfg.emaSlow),
     emaMid: ta.ema(close, cfg.emaMid),

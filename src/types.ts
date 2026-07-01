@@ -27,6 +27,7 @@ export interface Weights {
   stoch: number;
   bb: number;
   obv: number;
+  shadow: number; // K 棒影線加權項
 }
 
 export interface Config {
@@ -53,6 +54,15 @@ export interface Config {
   volumeFilter: boolean; // 量能不足時不出訊號
   volumeMult: number; // 當根量需 ≥ 均量 × 此倍數
   volumePeriod: number; // 均量計算根數
+  // 支撐/壓力硬降級:貼近反向水平價位時把訊號降為觀望。
+  srFilter: boolean;
+  srSpan: number; // 轉折高低點左右確認根數
+  srBufferATR: number; // 「貼近」門檻(×ATR)
+  // 均線斜率降權:趨勢族淨方向與長期均線斜率相反時,趨勢族權重打折(非降級)。
+  slopeFilter: boolean;
+  slopeLookback: number; // 量 emaLong 斜率的回看根數
+  slopeDiscount: number; // 逆斜率時趨勢族權重乘數(0~1)
+  shadowComp: boolean; // 啟用 K 棒影線加權項
   weights: Weights;
 }
 
@@ -60,6 +70,8 @@ export interface Indicators {
   cfg: Config;
   klines: Kline[];
   close: number[];
+  high: number[];
+  low: number[];
   emaFast: number[];
   emaSlow: number[];
   emaMid: number[];
@@ -85,6 +97,13 @@ export interface Component {
   note: string;
 }
 
+// 最近支撐/壓力與是否牴觸(conflict = 訊號往反向水平價位撞牆)。
+export interface SrInfo {
+  nearestRes: number;
+  nearestSup: number;
+  conflict: boolean;
+}
+
 export interface Result {
   index: number;
   direction: DirectionValue;
@@ -95,6 +114,7 @@ export interface Result {
   price: number;
   regime: Regime;
   volRatio: number; // 當根量 / 均量;NaN 表示未計算
+  sr?: SrInfo; // 支撐/壓力感知(srFilter 關閉時為 undefined)
 }
 
 // 解析後的指令。
