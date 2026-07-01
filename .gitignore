@@ -3,3 +3,5 @@ node_modules
 .wrangler
 dist
 *.log
+.env.local
+data

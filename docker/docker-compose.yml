@@ -1,0 +1,11 @@
+services:
+  detector:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    env_file: ../.env.local
+    environment:
+      - STATE_PATH=/app/data/signal-state.json
+    volumes:
+      - ../data:/app/data
+    restart: unless-stopped
