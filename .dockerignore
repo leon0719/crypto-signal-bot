@@ -5,3 +5,5 @@ data
 dist
 .wrangler
 *.log
+.superpowers
+docs

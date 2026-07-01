@@ -27,6 +27,10 @@ describe("computeLevels", () => {
   test("做多:停損=price−2ATR、目標=price+3ATR", () => {
     expect(computeLevels("LONG", 100, 2)).toEqual({ stop: 96, target: 106 });
   });
+  test("次美元幣用 5 位小數(做空)", () => {
+    // DOGE 例:price 0.07117、atr 0.00149
+    expect(computeLevels("SHORT", 0.07117, 0.00149)).toEqual({ stop: 0.07415, target: 0.0667 });
+  });
 });
 
 describe("filterOpportunities", () => {

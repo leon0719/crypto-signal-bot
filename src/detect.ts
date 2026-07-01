@@ -15,20 +15,23 @@ export interface Opportunity {
   oi: number | null;
 }
 
-// 四捨五入到 2 位(價格單位一致,避免浮點雜訊)。
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
+// 依價格量級決定小數位:次美元幣用 5 位,其餘 2 位(與 scan-market 的 atr 格式一致)。
+function roundToPrice(n: number, price: number): number {
+  const digits = Math.abs(price) < 1 ? 5 : 2;
+  const f = 10 ** digits;
+  return Math.round(n * f) / f;
 }
 
-// 停損停利:2×ATR 停損、3×ATR 目標,方向決定加減。
+// 停損停利:2×ATR 停損、3×ATR 目標,方向決定加減,精度隨價格量級。
 export function computeLevels(
   dir: "LONG" | "SHORT",
   price: number,
   atr: number,
 ): { stop: number; target: number } {
+  const r = (n: number) => roundToPrice(n, price);
   return dir === "SHORT"
-    ? { stop: round2(price + 2 * atr), target: round2(price - 3 * atr) }
-    : { stop: round2(price - 2 * atr), target: round2(price + 3 * atr) };
+    ? { stop: r(price + 2 * atr), target: r(price - 3 * atr) }
+    : { stop: r(price - 2 * atr), target: r(price + 3 * atr) };
 }
 
 // 只保留有效方向(通過三重確認)的列,轉成含進出場位的機會。

@@ -97,8 +97,9 @@ export async function runScan(): Promise<ScanRow[]> {
         fetchLastPrice("futures", sym),
       ]);
       rows.push(buildScanRow(sym, res, htf, oi, live));
-    } catch {
-      // fail-soft:單幣錯誤跳過
+    } catch (e) {
+      // fail-soft:單幣錯誤跳過,但記錄以利排障
+      console.warn(`掃描 ${sym} 失敗:${(e as Error).message}`);
     }
   }
   return rows;
