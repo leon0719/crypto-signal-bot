@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { build, defaultConfig } from "./signal.js";
+import { build, defaultConfig, evalAt } from "./signal.js";
 import type { Kline } from "./types.js";
 
 // 產生 n 根、每根 +pct 的等比上升 K 線(量能遞增以過量能過濾)。
@@ -33,6 +33,35 @@ describe("defaultConfig 新增開關預設關閉", () => {
     expect(c.slopeLookback).toBe(5);
     expect(c.slopeDiscount).toBe(0.5);
     expect(c.weights.shadow).toBe(0.5);
+  });
+});
+
+describe("K 棒影線加權項(shadowComp)", () => {
+  function seriesWithUpperShadow(): Kline[] {
+    const kl = uptrend(60);
+    const last = kl[kl.length - 1];
+    // 把最後一根改成長上影線:收盤壓回、上影拉長。
+    last.high = last.close * 1.03;
+    last.low = last.open * 0.999;
+    last.close = last.open * 1.001; // 收在低位
+    return kl;
+  }
+
+  test("關閉時 components 無影線項", () => {
+    const kl = seriesWithUpperShadow();
+    const ind = build(kl, defaultConfig());
+    const r = evalAt(ind, kl.length - 1);
+    expect(r?.components.some((c) => c.name === "K棒影線")).toBe(false);
+  });
+
+  test("開啟時長上影線產生偏空(負值)影線項", () => {
+    const kl = seriesWithUpperShadow();
+    const cfg = { ...defaultConfig(), shadowComp: true };
+    const ind = build(kl, cfg);
+    const r = evalAt(ind, kl.length - 1);
+    const comp = r?.components.find((c) => c.name === "K棒影線");
+    expect(comp).toBeDefined();
+    expect((comp as { value: number }).value).toBeLessThan(0);
   });
 });
 

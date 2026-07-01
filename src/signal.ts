@@ -126,14 +126,18 @@ export function evalAt(ind: Indicators, i: number): Result | null {
   if (Number.isNaN(adx)) adx = 0;
   const { regime, trendMul, rangeMul } = regimeOf(c, adx);
 
+  const trendRaw: Component[] = [
+    trendComp(ind, i),
+    emaCrossComp(ind, i),
+    macdComp(ind, i),
+    obvComp(ind, i),
+  ];
+  const rangeRaw: Component[] = [rsiComp(ind, i), stochComp(ind, i), bbComp(ind, i)];
+  if (c.shadowComp) rangeRaw.push(shadowComp(ind, i));
+
   const comps: Component[] = [
-    mul(trendComp(ind, i), trendMul),
-    mul(emaCrossComp(ind, i), trendMul),
-    mul(macdComp(ind, i), trendMul),
-    mul(obvComp(ind, i), trendMul),
-    mul(rsiComp(ind, i), rangeMul),
-    mul(stochComp(ind, i), rangeMul),
-    mul(bbComp(ind, i), rangeMul),
+    ...trendRaw.map((cp) => mul(cp, trendMul)),
+    ...rangeRaw.map((cp) => mul(cp, rangeMul)),
   ];
 
   let weighted = 0;
@@ -242,4 +246,11 @@ function bbComp(ind: Indicators, i: number): Component {
   const val = clamp((0.5 - pctB) * 2, -1, 1);
   const note = pctB < 0.2 ? "貼近下軌" : pctB > 0.8 ? "貼近上軌" : "通道中段";
   return { name: "Bollinger", value: val, weight: ind.cfg.weights.bb, note };
+}
+
+function shadowComp(ind: Indicators, i: number): Component {
+  const k = ind.klines[i];
+  const val = ta.shadowScore(k.open, k.high, k.low, k.close);
+  const note = val > 0.2 ? "下影承接" : val < -0.2 ? "上影拋壓" : "影線中性";
+  return { name: "K棒影線", value: val, weight: ind.cfg.weights.shadow, note };
 }
