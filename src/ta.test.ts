@@ -35,24 +35,24 @@ describe("swingPoints", () => {
 });
 
 describe("nearestSR", () => {
-  // 索引 3 是明確 swing high(左右各 2 根都較低),於索引 i≥5 才被確認;
-  // 索引 5 是明確 swing low(左右各 2 根都較高),於索引 i≥7 才被確認。
-  const high = [10, 11, 12, 20, 13, 19, 14, 13, 12, 15];
-  const low = [9, 8, 7, 3, 6, 2, 5, 4, 8, 6];
+  // span=2。已確認的 swing high 在 center 3(=20)與 center 6(=30);swing low 在 center 3(=1)與 center 6(=2)。
+  // 兩個轉折點相距 3 根(> span),彼此不互相否定,故都成立。
+  const high = [10, 11, 12, 20, 13, 14, 30, 15, 12, 16];
+  const low = [5, 4, 3, 1, 6, 7, 2, 8, 9, 4];
 
-  test("回傳現價上方最近壓力與下方最近支撐(不前視)", () => {
-    // i=9、price=16:index5 的 high=30、index3 的 high=20 都在上方,最近壓力取 20。
+  test("上方取最近壓力(多候選取較近者)、下方取最近支撐", () => {
+    // i=9、price=16:上方 swing high 有 20(c3)與 30(c6),最近取 20;下方 swing low 有 1(c3)與 2(c6),最近取 2。
     const { res, sup } = nearestSR(high, low, 9, 2, 16);
     expect(res).toBe(20);
-    // 下方 swing low:index0(1)、index8(1)等,取最接近 16 下方者。
-    expect(sup).toBeLessThan(16);
-    expect(Number.isNaN(sup)).toBe(false);
+    expect(sup).toBe(2);
   });
 
   test("尚未被右側 span 根確認的轉折不納入(避免前視)", () => {
-    // i=6 時,index5 的高點還沒有右側 2 根確認(需 i≥7),故不應作為壓力。
-    const { res } = nearestSR(high, low, 6, 2, 16);
-    expect(res).not.toBe(30);
+    // i=7、price=25:c6(=30)要到 i≥8 才被右側 2 根確認。有防前視守衛 → 排除 c6;
+    // 上方唯一較早的 swing high 是 c3=20(< 25 不算壓力)→ 回 NaN。
+    // 若拿掉 center ≤ i-span 守衛,c6=30 會被誤納入而回 30 —— 本測試即用來抓這種回歸。
+    const { res } = nearestSR(high, low, 7, 2, 25);
+    expect(Number.isNaN(res)).toBe(true);
   });
 
   test("上方無壓力時回 NaN", () => {
