@@ -38,13 +38,13 @@ export function defaultConfig(): Config {
     volumeFilter: true,
     volumeMult: 1.0, // 當根量 ≥ 均量即可(1.0)。回測顯示 1.0 比 1.2 樣本外期望值更高且 8/8 標的全賺。
     volumePeriod: 20,
-    srFilter: false,
+    srFilter: true, // 回測(MTF 疊加、4h/1h、樣本外、8 標的):三者全開最佳(4h avgR 0.001→0.166、賺錢 4→7/8;1h avgR 0.014→0.054、賺錢 2→4/8),srFilter 亦個別優於 baseline。
     srSpan: 5,
     srBufferATR: 0.5,
-    slopeFilter: false,
+    slopeFilter: true, // 回測(MTF 疊加、4h/1h、樣本外、8 標的):三者全開最佳(4h avgR 0.001→0.166、賺錢 4→7/8;1h avgR 0.014→0.054、賺錢 2→4/8),slopeFilter 亦個別優於 baseline。
     slopeLookback: 5,
     slopeDiscount: 0.5,
-    shadowComp: false,
+    shadowComp: true, // 回測(MTF 疊加、4h/1h、樣本外、8 標的):三者全開最佳(4h avgR 0.001→0.166、賺錢 4→7/8;1h avgR 0.014→0.054、賺錢 2→4/8),shadowComp 亦個別優於 baseline。
     weights: {
       trend: 2.0,
       emaCross: 1.5,
@@ -175,7 +175,13 @@ export function evalAt(ind: Indicators, i: number): Result | null {
   let sr: SrInfo | undefined;
   if (c.srFilter) {
     const price = ind.close[i];
-    const { res: nearestRes, sup: nearestSup } = ta.nearestSR(ind.high, ind.low, i, c.srSpan, price);
+    const { res: nearestRes, sup: nearestSup } = ta.nearestSR(
+      ind.high,
+      ind.low,
+      i,
+      c.srSpan,
+      price,
+    );
     const buf = c.srBufferATR * ind.atr[i];
     let conflict = false;
     if (dir === Direction.Long && !Number.isNaN(nearestRes) && nearestRes - price <= buf) {

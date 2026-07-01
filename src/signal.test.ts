@@ -22,12 +22,12 @@ export function uptrend(n: number, pct = 0.01, start = 100): Kline[] {
   return out;
 }
 
-describe("defaultConfig 新增開關預設關閉", () => {
-  test("三個增強開關預設 false、含新參數與影線權重", () => {
+describe("defaultConfig 三個增強開關依樣本外回測預設開啟", () => {
+  test("三個增強開關預設 true、含新參數與影線權重", () => {
     const c = defaultConfig();
-    expect(c.srFilter).toBe(false);
-    expect(c.slopeFilter).toBe(false);
-    expect(c.shadowComp).toBe(false);
+    expect(c.srFilter).toBe(true);
+    expect(c.slopeFilter).toBe(true);
+    expect(c.shadowComp).toBe(true);
     expect(c.srSpan).toBe(5);
     expect(c.srBufferATR).toBe(0.5);
     expect(c.slopeLookback).toBe(5);
@@ -49,7 +49,7 @@ describe("K 棒影線加權項(shadowComp)", () => {
 
   test("關閉時 components 無影線項", () => {
     const kl = seriesWithUpperShadow();
-    const ind = build(kl, defaultConfig());
+    const ind = build(kl, { ...defaultConfig(), shadowComp: false });
     const r = evalAt(ind, kl.length - 1);
     expect(r?.components.some((c) => c.name === "K棒影線")).toBe(false);
   });
@@ -112,7 +112,7 @@ describe("均線斜率降權(slopeFilter)", () => {
 
   test("對齊(純上升)時開關不改變分數", () => {
     const kl = uptrend(260);
-    const off = build(kl, defaultConfig());
+    const off = build(kl, { ...defaultConfig(), slopeFilter: false });
     const on = build(kl, { ...defaultConfig(), slopeFilter: true });
     const i = kl.length - 1;
     expect(evalAt(on, i)?.score).toBeCloseTo(evalAt(off, i)?.score ?? 0, 6);
@@ -121,7 +121,7 @@ describe("均線斜率降權(slopeFilter)", () => {
   test("逆斜率(彈升但長均線下彎)時分數絕對值下降", () => {
     const kl = downThenBounce();
     const i = kl.length - 1;
-    const off = evalAt(build(kl, defaultConfig()), i);
+    const off = evalAt(build(kl, { ...defaultConfig(), slopeFilter: false }), i);
     const on = evalAt(build(kl, { ...defaultConfig(), slopeFilter: true }), i);
     expect(off).not.toBeNull();
     expect(on).not.toBeNull();
@@ -161,14 +161,14 @@ describe("支撐/壓力硬降級(srFilter)", () => {
 
   test("關閉時 Result.sr 為 undefined", () => {
     const kl = bumpIntoResistance();
-    const ind = build(kl, defaultConfig());
+    const ind = build(kl, { ...defaultConfig(), srFilter: false });
     expect(evalAt(ind, kl.length - 1)?.sr).toBeUndefined();
   });
 
   test("開啟時做多撞上方壓力的訊號被降為觀望", () => {
     const kl = bumpIntoResistance();
     const cfg = { ...defaultConfig(), srFilter: true, srBufferATR: 1.5 };
-    const off = build(kl, defaultConfig());
+    const off = build(kl, { ...defaultConfig(), srFilter: false });
     const on = build(kl, cfg);
     let downgraded = 0;
     let checked = 0;

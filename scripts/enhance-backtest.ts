@@ -114,7 +114,9 @@ function evalConfig(data: Dataset[], cfg: Config, baseInterval: string, mtf: boo
   let minPF = Number.POSITIVE_INFINITY;
   let profitable = 0;
   for (const d of data) {
-    const filter = mtf ? htfEntryFilter(d.klines, d.htf, baseInterval, htfInterval, cfg) : undefined;
+    const filter = mtf
+      ? htfEntryFilter(d.klines, d.htf, baseInterval, htfInterval, cfg)
+      : undefined;
     const r = backtest(d.klines, cfg, { entryFilter: filter });
     all.push(...r.trades);
     if (r.total >= 5) {
