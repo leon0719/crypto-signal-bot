@@ -1,0 +1,9 @@
+node_modules
+.git
+.env.local
+data
+dist
+.wrangler
+*.log
+.superpowers
+docs

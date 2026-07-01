@@ -12,6 +12,7 @@
     "lint": "biome lint .",
     "check": "biome check . && tsc --noEmit",
     "richmenu": "bun scripts/setup-richmenu.ts",
+    "detect": "bun scripts/detect.ts",
     "backtest": "bun scripts/backtest.ts",
     "sweep": "bun scripts/sweep.ts",
     "optimize": "bun scripts/optimize.ts"
