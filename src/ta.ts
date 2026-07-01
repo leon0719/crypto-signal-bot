@@ -234,3 +234,49 @@ export function obv(close: number[], volume: number[]): number[] {
   }
   return out;
 }
+
+// 在索引 i(含)之前、已被右側 span 根確認的轉折點中,找最接近現價的壓力(上方)與支撐(下方)。
+// 只考慮 center ≤ i - span 者(右側已收滿 span 根),避免回測前視偏差。lookback 限制回看成本。
+export function nearestSR(
+  high: number[],
+  low: number[],
+  i: number,
+  span: number,
+  price: number,
+  lookback = 200,
+): { res: number; sup: number } {
+  let res = Number.NaN;
+  let sup = Number.NaN;
+  if (span < 1) return { res, sup };
+  const from = Math.max(span, i - span - lookback);
+  for (let c = i - span; c >= from; c--) {
+    let isHigh = true;
+    let isLow = true;
+    for (let j = c - span; j <= c + span; j++) {
+      if (j === c) continue;
+      if (high[j] >= high[c]) isHigh = false;
+      if (low[j] <= low[c]) isLow = false;
+    }
+    if (isHigh && high[c] > price && (Number.isNaN(res) || high[c] < res)) res = high[c];
+    if (isLow && low[c] < price && (Number.isNaN(sup) || low[c] > sup)) sup = low[c];
+  }
+  return { res, sup };
+}
+
+// 序列在索引 i 相對 lookback 根前的斜率方向:1 上、-1 下、0 持平或資料不足。
+export function slopeSign(series: number[], i: number, lookback: number): number {
+  const j = i - lookback;
+  if (j < 0 || Number.isNaN(series[i]) || Number.isNaN(series[j])) return 0;
+  const d = series[i] - series[j];
+  return d > 0 ? 1 : d < 0 ? -1 : 0;
+}
+
+// 單根 K 棒影線拒絕分數:長下影→正(偏多)、長上影→負(偏空),clamp 至 ±1;range≤0 回 0。
+export function shadowScore(open: number, high: number, low: number, close: number): number {
+  const range = high - low;
+  if (range <= 0) return 0;
+  const upper = high - Math.max(open, close);
+  const lower = Math.min(open, close) - low;
+  const v = (lower - upper) / range;
+  return v < -1 ? -1 : v > 1 ? 1 : v;
+}
