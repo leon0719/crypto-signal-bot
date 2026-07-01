@@ -10,6 +10,7 @@ import {
   type Kline,
   type Regime,
   type Result,
+  type SrInfo,
 } from "./types.js";
 
 export function defaultConfig(): Config {
@@ -170,6 +171,23 @@ export function evalAt(ind: Indicators, i: number): Result | null {
     }
   }
 
+  // 支撐/壓力硬降級:貼近反向水平價位時降為觀望(與 MTF/OI「非對抗過濾」一致)。
+  let sr: SrInfo | undefined;
+  if (c.srFilter) {
+    const price = ind.close[i];
+    const { res: nearestRes, sup: nearestSup } = ta.nearestSR(ind.high, ind.low, i, c.srSpan, price);
+    const buf = c.srBufferATR * ind.atr[i];
+    let conflict = false;
+    if (dir === Direction.Long && !Number.isNaN(nearestRes) && nearestRes - price <= buf) {
+      conflict = true;
+    }
+    if (dir === Direction.Short && !Number.isNaN(nearestSup) && price - nearestSup <= buf) {
+      conflict = true;
+    }
+    if (conflict) dir = Direction.Neutral;
+    sr = { nearestRes, nearestSup, conflict };
+  }
+
   return {
     index: i,
     direction: dir,
@@ -180,6 +198,7 @@ export function evalAt(ind: Indicators, i: number): Result | null {
     price: ind.close[i],
     regime,
     volRatio,
+    sr,
   };
 }
 
