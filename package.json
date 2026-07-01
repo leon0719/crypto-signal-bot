@@ -15,7 +15,8 @@
     "detect": "bun scripts/detect.ts",
     "backtest": "bun scripts/backtest.ts",
     "sweep": "bun scripts/sweep.ts",
-    "optimize": "bun scripts/optimize.ts"
+    "optimize": "bun scripts/optimize.ts",
+    "enhance-backtest": "bun scripts/enhance-backtest.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",
