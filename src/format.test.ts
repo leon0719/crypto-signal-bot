@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildFlexMessage } from "./format.js";
+import { buildBubble, buildFlexMessage } from "./format.js";
 import { build, defaultConfig, evalAt } from "./signal.js";
 import {
   type AnalyzeCommand,
@@ -120,5 +120,16 @@ describe("buildFlexMessage OI 確認", () => {
     expect(blob).toContain("資金反向 ✗");
     expect(blob).toContain("OI");
     expect(blob).not.toContain("交易規劃");
+  });
+});
+
+describe("卡片顯示支撐/壓力", () => {
+  test("res.sr 存在時 bubble JSON 含支撐/壓力文字", () => {
+    const kl = uptrend(80);
+    const ind = build(kl, { ...defaultConfig(), srFilter: true });
+    const res = evalAt(ind, kl.length - 1);
+    if (!res) throw new Error("res 應存在");
+    const bubble = buildBubble(meta, ind, res);
+    expect(JSON.stringify(bubble)).toContain("支撐/壓力");
   });
 });

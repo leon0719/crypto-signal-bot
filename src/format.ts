@@ -148,6 +148,11 @@ function entryPlan(ind: Indicators, res: Result, isLong: boolean): Plan {
 
 // 觀望時的說明:大週期牴觸 / 量能不足 / 多空分歧,擇一。
 function neutralNote(ind: Indicators, res: Result, htf?: HtfInfo, oi?: OiInfo): string {
+  if (res.sr?.conflict) {
+    return res.score > 0
+      ? "📌 上方緊鄰壓力,追多勝算低,降級為觀望,等突破或回踩再說。"
+      : "📌 下方緊鄰支撐,追空勝算低,降級為觀望,等跌破或反彈再說。";
+  }
   if (htf?.conflict) return "📌 大週期方向相反,降級為觀望,不建議逆勢進場。";
   if (oi?.conflict) return "📌 未平倉量(OI)正往反向擴張,資金不挺此方向,降級為觀望。";
   const gatedByVolume =
@@ -243,6 +248,16 @@ export function buildBubble(
     const value = oi.conflict ? "資金反向 ✗" : oi.dir === 0 ? "資金收縮 ―" : "資金同向 ✓";
     const color = oi.conflict ? COLOR.short : oi.dir === 0 ? COLOR.sub : COLOR.long;
     body.push(kvRow("未平倉量(OI)", value, color, "bold"));
+  }
+
+  // 支撐/壓力感知(srFilter 開啟才有)。
+  if (res.sr) {
+    const parts: string[] = [];
+    if (!Number.isNaN(res.sr.nearestSup)) parts.push(`支 ${fmtNum(res.sr.nearestSup)}`);
+    if (!Number.isNaN(res.sr.nearestRes)) parts.push(`壓 ${fmtNum(res.sr.nearestRes)}`);
+    const value = res.sr.conflict ? "緊鄰反向 ✗" : parts.length ? parts.join("｜") : "無明確水平";
+    const color = res.sr.conflict ? COLOR.short : COLOR.sub;
+    body.push(kvRow("支撐/壓力", value, color, res.sr.conflict ? "bold" : "regular"));
   }
 
   body.push(separator());
