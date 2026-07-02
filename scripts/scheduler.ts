@@ -36,4 +36,16 @@ while (true) {
     env: process.env,
   });
   await proc.exited;
+
+  // 每週一 UTC 00 點那輪掃描後,自動推一張紙上交易週報成績單
+  const d = new Date();
+  if (everySeconds === 0 && d.getUTCDay() === 1 && d.getUTCHours() === 0) {
+    console.log(`[${d.toISOString()}] 推播紙上交易週報…`);
+    const rep = Bun.spawn(["bun", "scripts/paper-report.ts"], {
+      stdout: "inherit",
+      stderr: "inherit",
+      env: process.env,
+    });
+    await rep.exited;
+  }
 }

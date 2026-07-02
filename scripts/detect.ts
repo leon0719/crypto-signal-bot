@@ -1,10 +1,17 @@
-// 定時偵測進入點:掃描 → 篩有效機會 → 與上輪去重 → 只推新機會到 Slack。
+// 定時偵測進入點:掃描 → 篩有效機會 → 與上輪去重 → 只推新機會到 Slack → 紙上交易記帳。
+import { fetchKlines } from "../src/bybit.js";
 import { diffNewOpportunities, filterOpportunities, keyOf } from "../src/detect.js";
-import { runScan } from "../src/scan.js";
+import { defaultPaperConfig } from "../src/paper.js";
+import { runPaper } from "../src/paper-run.js";
+import { readLedger, writeLedger } from "../src/paper-state.js";
+import { INTERVAL, runScan } from "../src/scan.js";
 import { buildSlackText, postMessage } from "../src/slack.js";
 import { readActive, writeActive } from "../src/state.js";
 
 const STATE_PATH = process.env.STATE_PATH ?? "./data/signal-state.json";
+const PAPER_PATH = process.env.PAPER_LEDGER_PATH ?? "./data/paper-ledger.json";
+const PAPER_START = Number(process.env.PAPER_START_EQUITY ?? 2000);
+const PAPER_ENABLED = process.env.PAPER_ENABLED !== "0";
 
 const rows = await runScan();
 
@@ -40,4 +47,29 @@ if (rows.length === 0) {
     }
   }
   await writeActive(STATE_PATH, committed);
+
+  // 紙上交易記帳:結算未結部位 + 用本輪「新機會」開新部位。失敗不影響訊號推播。
+  if (PAPER_ENABLED) {
+    try {
+      const cfg = { ...defaultPaperConfig(), startEquity: PAPER_START };
+      const ledger = await readLedger(PAPER_PATH, PAPER_START);
+      const result = await runPaper(
+        news,
+        ledger,
+        cfg,
+        (sym) => fetchKlines("futures", sym, INTERVAL, 400),
+        Date.now(),
+      );
+      await writeLedger(PAPER_PATH, result.ledger);
+      const { summary: s, opened, closed } = result;
+      console.log(
+        `[紙上交易] 新開 ${opened.length}、本輪結算 ${closed.length}｜` +
+          `已結 ${s.closed} 勝率 ${(s.winRate * 100).toFixed(0)}% avgR ${s.avgR.toFixed(2)} ` +
+          `PF ${s.profitFactor === Number.POSITIVE_INFINITY ? "∞" : s.profitFactor.toFixed(2)}｜` +
+          `權益 ${s.equity.toFixed(1)} USDT`,
+      );
+    } catch (e) {
+      console.error(`[紙上交易] 記帳失敗:${(e as Error).message}`);
+    }
+  }
 }

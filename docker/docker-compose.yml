@@ -5,7 +5,9 @@ services:
       dockerfile: docker/Dockerfile
     env_file: ../.env.local
     environment:
+      # 容器專屬路徑(volume 掛載點);其餘設定值走 .env.local(env_file)
       - STATE_PATH=/app/data/signal-state.json
+      - PAPER_LEDGER_PATH=/app/data/paper-ledger.json
     volumes:
       - ../data:/app/data
     restart: unless-stopped
