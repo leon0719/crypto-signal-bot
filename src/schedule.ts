@@ -13,3 +13,8 @@ export function nextRunTime(now: Date, hours: number[], minute: number): Date {
   }
   return t; // 理論上不會到這(hours 非空時 48 小時內必有解)
 }
+
+// 每天 UTC 00 那輪掃描後推紙上交易成績單(2026-07-16 由每週一改為每日)。
+export function shouldPushReport(now: Date): boolean {
+  return now.getUTCHours() === 0;
+}

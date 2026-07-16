@@ -2,7 +2,7 @@
 // 純 bun、零外部相依,取代 supercronic(其在本機 colima 容器有 fork/exec 相容問題)。
 // 每次觸發以子行程跑 scripts/detect.ts,子行程失敗不會拖垮排程器。
 // 可用環境變數 SCAN_EVERY_SECONDS 覆寫為「每 N 秒」模式(測試用)。
-import { nextRunTime } from "../src/schedule.js";
+import { nextRunTime, shouldPushReport } from "../src/schedule.js";
 
 const RUN_HOURS = [0, 4, 8, 12, 16, 20];
 const RUN_MINUTE = 2;
@@ -37,10 +37,10 @@ while (true) {
   });
   await proc.exited;
 
-  // 每週一 UTC 00 點那輪掃描後,自動推一張紙上交易週報成績單
+  // 每天 UTC 00 點那輪掃描後,自動推一張紙上交易成績單(日報)
   const d = new Date();
-  if (everySeconds === 0 && d.getUTCDay() === 1 && d.getUTCHours() === 0) {
-    console.log(`[${d.toISOString()}] 推播紙上交易週報…`);
+  if (everySeconds === 0 && shouldPushReport(d)) {
+    console.log(`[${d.toISOString()}] 推播紙上交易日報…`);
     const rep = Bun.spawn(["bun", "scripts/paper-report.ts"], {
       stdout: "inherit",
       stderr: "inherit",
