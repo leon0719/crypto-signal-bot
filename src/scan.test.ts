@@ -56,22 +56,18 @@ describe("buildScanRow", () => {
 });
 
 describe("runScan 週期參數", () => {
-  test(
-    "以 1h 參數呼叫 → kline 請求帶 interval=60",
-    async () => {
-      const urls: string[] = [];
-      globalThis.fetch = mock(async (url: string) => {
-        urls.push(String(url));
-        throw new Error("測試中斷"); // 每幣 fail-soft,只需驗證 URL
-      }) as unknown as typeof fetch;
+  test("以 1h 參數呼叫 → kline 請求帶 interval=60", async () => {
+    const urls: string[] = [];
+    globalThis.fetch = mock(async (url: string) => {
+      urls.push(String(url));
+      return new Response(JSON.stringify({ retCode: 10001, retMsg: "params error: symbol invalid" }));
+    }) as unknown as typeof fetch;
 
-      const rows = await runScan("1h", "4h");
+    const rows = await runScan("1h", "4h");
 
-      expect(rows).toEqual([]); // 全數失敗 → 空結果
-      const klineUrls = urls.filter((u) => u.includes("/market/kline"));
-      expect(klineUrls.length).toBeGreaterThan(0);
-      for (const u of klineUrls) expect(u).toContain("interval=60");
-    },
-    { timeout: 30000 }
-  );
+    expect(rows).toEqual([]); // 全數失敗 → 空結果
+    const klineUrls = urls.filter((u) => u.includes("/market/kline"));
+    expect(klineUrls.length).toBeGreaterThan(0);
+    for (const u of klineUrls) expect(u).toContain("interval=60");
+  });
 });
