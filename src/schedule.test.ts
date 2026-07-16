@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { nextRunTime, shouldPushReport } from "./schedule.js";
+import { isStrategyDue, nextRunTime, shouldPushReport } from "./schedule.js";
 
 const HOURS = [0, 4, 8, 12, 16, 20];
 
@@ -42,5 +42,25 @@ describe("shouldPushReport:每天 UTC0 推成績單", () => {
   test("其他掃描時段 → false", () => {
     expect(shouldPushReport(new Date("2026-07-16T04:02:00Z"))).toBe(false);
     expect(shouldPushReport(new Date("2026-07-16T20:59:00Z"))).toBe(false);
+  });
+});
+
+describe("isStrategyDue:每小時排程器決定該小時跑哪些策略", () => {
+  test("1h 每小時都執行", () => {
+    expect(isStrategyDue("1h", new Date("2026-07-16T05:02:00Z"))).toBe(true);
+    expect(isStrategyDue("1h", new Date("2026-07-16T23:02:00Z"))).toBe(true);
+  });
+  test("4h 只在 UTC 小時整除 4 時執行", () => {
+    expect(isStrategyDue("4h", new Date("2026-07-16T08:02:00Z"))).toBe(true);
+    expect(isStrategyDue("4h", new Date("2026-07-16T09:02:00Z"))).toBe(false);
+    expect(isStrategyDue("4h", new Date("2026-07-16T00:02:00Z"))).toBe(true);
+  });
+});
+
+describe("nextRunTime:每小時模式(24 小時全開)", () => {
+  test("任何時刻 → 下一個整點 :02", () => {
+    const all = Array.from({ length: 24 }, (_, h) => h);
+    const now = new Date("2026-07-01T06:05:00.000Z");
+    expect(nextRunTime(now, all, 2).toISOString()).toBe("2026-07-01T07:02:00.000Z");
   });
 });

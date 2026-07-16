@@ -18,3 +18,11 @@ export function nextRunTime(now: Date, hours: number[], minute: number): Date {
 export function shouldPushReport(now: Date): boolean {
   return now.getUTCHours() === 0;
 }
+
+// 每小時觸發的排程器用:此 UTC 小時是否輪到該週期的策略。"Nh" → 小時整除 N。
+// 非小時制週期(理論上不會出現)一律 true,由呼叫端自行約束。
+export function isStrategyDue(interval: string, now: Date): boolean {
+  if (!interval.endsWith("h")) return true;
+  const n = Number(interval.slice(0, -1)) || 1;
+  return now.getUTCHours() % n === 0;
+}
