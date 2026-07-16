@@ -148,15 +148,23 @@ export interface OpenMark {
   unrealized: number; // 浮動損益(USDT)
 }
 
-// 組週報成績單(Slack 純文字)。傳入已結彙整 + 未結部位的現價評估。
-export function buildScorecard(s: Summary, opens: OpenMark[], periodLabel: string): string {
+// 組成績單(Slack 純文字)。opts 可帶策略標籤(標題)與基準註解(樣本足夠時顯示)。
+export function buildScorecard(
+  s: Summary,
+  opens: OpenMark[],
+  periodLabel: string,
+  opts: { strategyLabel?: string; baseline?: string } = {},
+): string {
   const sign = (n: number) => (n >= 0 ? "+" : "");
   const pct = ((s.equity - s.startEquity) / s.startEquity) * 100;
   const pf = s.profitFactor === Number.POSITIVE_INFINITY ? "∞" : s.profitFactor.toFixed(2);
   const unreal = opens.reduce((a, o) => a + o.unrealized, 0);
 
+  const title = opts.strategyLabel
+    ? `📊 紙上交易成績單 · ${opts.strategyLabel} 策略 · ${periodLabel}`
+    : `📊 紙上交易成績單 · ${periodLabel}`;
   const head =
-    `📊 紙上交易成績單 · ${periodLabel}\n` +
+    `${title}\n` +
     `權益 ${s.equity.toFixed(1)} / ${s.startEquity} USDT ` +
     `(${sign(pct)}${pct.toFixed(2)}%,已結 ${sign(s.realized)}${s.realized.toFixed(1)})`;
 
@@ -181,7 +189,8 @@ export function buildScorecard(s: Summary, opens: OpenMark[], periodLabel: strin
   const note =
     s.closed < 20
       ? "⚠️ 樣本 <20 筆,勝率/PF 尚無統計意義,請持續累積。"
-      : "基準:回測 4h avgR ≈ +0.10;明顯低於此值才代表策略在當前市場失效。";
+      : (opts.baseline ??
+        "基準:回測 4h avgR ≈ +0.10;明顯低於此值才代表策略在當前市場失效。");
 
   return [head, "", stats, "", openBlock, "", note].join("\n");
 }

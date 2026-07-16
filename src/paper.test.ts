@@ -10,6 +10,7 @@ import {
   settlePosition,
   sizePosition,
   summarize,
+  type Summary,
 } from "./paper.js";
 import { runPaper } from "./paper-run.js";
 import type { PaperLedger } from "./paper-state.js";
@@ -250,6 +251,44 @@ describe("buildScorecard", () => {
     expect(txt).toContain("紙上交易成績單");
     expect(txt).toContain("BNBUSDT 空");
     expect(txt).toContain("樣本 <20 筆");
+  });
+
+  test("帶策略標籤 → 標題含「· 1h 策略」;樣本足夠時顯示自訂基準", () => {
+    const s20: Summary = {
+      startEquity: 2000,
+      realized: 100,
+      equity: 2100,
+      closed: 20,
+      wins: 12,
+      losses: 8,
+      winRate: 0.6,
+      avgR: 0.1,
+      profitFactor: 1.5,
+      maxConsecLoss: 3,
+      open: 0,
+      best: 30,
+      worst: -15,
+    };
+    const txt = buildScorecard(s20, [], "測試期", {
+      strategyLabel: "1h",
+      baseline: "基準:回測 1h avgR ≈ +0.05;明顯低於此值才代表策略在當前市場失效。",
+    });
+    expect(txt).toContain("紙上交易成績單 · 1h 策略 · 測試期");
+    expect(txt).toContain("回測 1h avgR");
+  });
+
+  test("樣本 <20 筆時,即使帶 baseline 仍顯示警語", () => {
+    const s = summarize([], cfg);
+    const txt = buildScorecard(s, [], "測試期", { strategyLabel: "1h", baseline: "自訂基準" });
+    expect(txt).toContain("樣本 <20 筆");
+    expect(txt).not.toContain("自訂基準");
+  });
+
+  test("不帶 opts → 輸出與現行相同(標題無策略名)", () => {
+    const s = summarize([], cfg);
+    const txt = buildScorecard(s, [], "測試期");
+    expect(txt).toContain("紙上交易成績單 · 測試期");
+    expect(txt).not.toContain("策略");
   });
 });
 
