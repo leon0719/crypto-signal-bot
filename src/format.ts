@@ -1,5 +1,6 @@
 // 把分析結果格式化成 LINE Flex 圖卡 + quick reply。
 
+import { suggestLeverage } from "./risk.js";
 import * as ta from "./ta.js";
 import {
   type AnalyzeCommand,
@@ -320,6 +321,16 @@ export function buildBubble(
       for (const row of leverageRows(meta.leverage, isLong, p.entry, p.lossPct, p.winPct))
         body.push(row);
     }
+  }
+
+  // 依 ATR 波動度的建議槓桿(1x–5x,詳 risk.ts)——期貨一律顯示,與使用者自帶槓桿試算並存。
+  if (meta.market === "futures") {
+    const suggested = suggestLeverage(res.atr, res.price);
+    const atrPct = (res.atr / res.price) * 100;
+    body.push(separator());
+    body.push(
+      kvRow("⚡ 建議槓桿", `${suggested}x(ATR 波動 ${atrPct.toFixed(1)}%)`, COLOR.text, "bold"),
+    );
   }
 
   return {

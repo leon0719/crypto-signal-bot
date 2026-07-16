@@ -133,3 +133,27 @@ describe("卡片顯示支撐/壓力", () => {
     expect(JSON.stringify(bubble)).toContain("支撐/壓力");
   });
 });
+
+describe("建議槓桿列(ATR 動態)", () => {
+  test("期貨卡片含建議槓桿列", () => {
+    const { ind, res } = longSetup();
+    const msg = buildFlexMessage(meta, ind, res);
+    const s = JSON.stringify(msg);
+    expect(s).toContain("建議槓桿");
+    expect(s).toContain("ATR 波動");
+  });
+
+  test("spot 卡片不顯示建議槓桿", () => {
+    const { ind, res } = longSetup();
+    const msg = buildFlexMessage({ ...meta, market: "spot" }, ind, res);
+    expect(JSON.stringify(msg)).not.toContain("建議槓桿");
+  });
+
+  test("使用者自帶槓桿時,槓桿試算列與建議槓桿列並存", () => {
+    const { ind, res } = longSetup();
+    const msg = buildFlexMessage({ ...meta, leverage: 10 }, ind, res);
+    const s = JSON.stringify(msg);
+    expect(s).toContain("⚡ 槓桿 10×");
+    expect(s).toContain("建議槓桿");
+  });
+});
