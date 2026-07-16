@@ -50,6 +50,9 @@ export function buildScanRow(
   };
 }
 
+// 2026-07-16 依回測(500 天、樣本外後 30%)+ 紙上交易前向結果調整:
+// 移除雙重確認虧損的 SUI/NEAR/TON/APT;加入兩段皆賺的 ZEC/ONDO;
+// MU(美光股票型永續)歷史僅 ~70 天無法驗證,作為低相關實驗倉觀察。
 export const SYMBOLS = [
   "BTCUSDT",
   "ETHUSDT",
@@ -60,12 +63,11 @@ export const SYMBOLS = [
   "ADAUSDT",
   "AVAXUSDT",
   "LINKUSDT",
-  "SUIUSDT",
-  "TONUSDT",
   "LTCUSDT",
   "BCHUSDT",
-  "NEARUSDT",
-  "APTUSDT",
+  "ZECUSDT",
+  "ONDOUSDT",
+  "MUUSDT",
 ];
 export const INTERVAL = "4h";
 export const HTF = "1d";
