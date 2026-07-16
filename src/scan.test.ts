@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
-import { buildScanRow } from "./scan.js";
+import { afterEach, describe, expect, mock, test } from "bun:test";
+import { buildScanRow, runScan } from "./scan.js";
 import type { Result } from "./types.js";
 import { Direction } from "./types.js";
 
@@ -17,6 +17,8 @@ function res(dir: (typeof Direction)[keyof typeof Direction], over: Partial<Resu
     ...over,
   };
 }
+
+afterEach(() => mock.restore());
 
 describe("buildScanRow", () => {
   test("有效 SHORT、HTF 與 OI 同向不衝突 → effective=SHORT", () => {
@@ -51,4 +53,25 @@ describe("buildScanRow", () => {
     expect(row.oiConflict).toBe(false);
     expect(row.effective).toBe("SHORT");
   });
+});
+
+describe("runScan 週期參數", () => {
+  test(
+    "以 1h 參數呼叫 → kline 請求帶 interval=60",
+    async () => {
+      const urls: string[] = [];
+      globalThis.fetch = mock(async (url: string) => {
+        urls.push(String(url));
+        throw new Error("測試中斷"); // 每幣 fail-soft,只需驗證 URL
+      }) as unknown as typeof fetch;
+
+      const rows = await runScan("1h", "4h");
+
+      expect(rows).toEqual([]); // 全數失敗 → 空結果
+      const klineUrls = urls.filter((u) => u.includes("/market/kline"));
+      expect(klineUrls.length).toBeGreaterThan(0);
+      for (const u of klineUrls) expect(u).toContain("interval=60");
+    },
+    { timeout: 30000 }
+  );
 });

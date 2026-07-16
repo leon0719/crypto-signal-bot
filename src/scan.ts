@@ -69,14 +69,14 @@ export const SYMBOLS = [
   "ONDOUSDT",
   "MUUSDT",
 ];
-export const INTERVAL = "4h";
-export const HTF = "1d";
+export const INTERVAL = "4h"; // 預設策略週期(strategies.ts 可覆寫)
+export const HTF = "1d"; // 預設大週期確認
 
 const cfg = defaultConfig();
 
-async function htfScore(sym: string): Promise<number | null> {
+async function htfScore(sym: string, htf: string): Promise<number | null> {
   try {
-    const k = await fetchKlines("futures", sym, HTF, 400);
+    const k = await fetchKlines("futures", sym, htf, 400);
     if (k.length < minBars(cfg)) return null;
     return evalAt(build(k, cfg), k.length - 1)?.score ?? null;
   } catch {
@@ -85,20 +85,20 @@ async function htfScore(sym: string): Promise<number | null> {
 }
 
 // 掃描全部 SYMBOLS,回結構化列。單幣失敗 fail-soft 跳過(不進結果)。
-export async function runScan(): Promise<ScanRow[]> {
+export async function runScan(interval: string = INTERVAL, htf: string = HTF): Promise<ScanRow[]> {
   const rows: ScanRow[] = [];
   for (const sym of SYMBOLS) {
     try {
-      const klines = await fetchKlines("futures", sym, INTERVAL, 400);
+      const klines = await fetchKlines("futures", sym, interval, 400);
       const ind = build(klines, cfg);
       const res = evalAt(ind, ind.klines.length - 2); // 最後一根已收盤 K 棒
       if (!res) continue;
-      const [htf, oi, live] = await Promise.all([
-        htfScore(sym),
-        evalOiDir(sym, INTERVAL, ind.klines),
+      const [htfVal, oi, live] = await Promise.all([
+        htfScore(sym, htf),
+        evalOiDir(sym, interval, ind.klines),
         fetchLastPrice("futures", sym),
       ]);
-      rows.push(buildScanRow(sym, res, htf, oi, live));
+      rows.push(buildScanRow(sym, res, htfVal, oi, live));
     } catch (e) {
       // fail-soft:單幣錯誤跳過,但記錄以利排障
       console.warn(`掃描 ${sym} 失敗:${(e as Error).message}`);
