@@ -60,7 +60,9 @@ describe("runScan 週期參數", () => {
     const urls: string[] = [];
     globalThis.fetch = mock(async (url: string) => {
       urls.push(String(url));
-      return new Response(JSON.stringify({ retCode: 10001, retMsg: "params error: symbol invalid" }));
+      return new Response(
+        JSON.stringify({ retCode: 10001, retMsg: "params error: symbol invalid" }),
+      );
     }) as unknown as typeof fetch;
 
     const rows = await runScan("1h", "4h");

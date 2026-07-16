@@ -7,10 +7,10 @@ import {
   markToMarket,
   openPositions,
   type PaperPosition,
+  type Summary,
   settlePosition,
   sizePosition,
   summarize,
-  type Summary,
 } from "./paper.js";
 import { runPaper } from "./paper-run.js";
 import type { PaperLedger } from "./paper-state.js";

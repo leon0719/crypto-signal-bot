@@ -189,8 +189,7 @@ export function buildScorecard(
   const note =
     s.closed < 20
       ? "⚠️ 樣本 <20 筆,勝率/PF 尚無統計意義,請持續累積。"
-      : (opts.baseline ??
-        "基準:回測 4h avgR ≈ +0.10;明顯低於此值才代表策略在當前市場失效。");
+      : (opts.baseline ?? "基準:回測 4h avgR ≈ +0.10;明顯低於此值才代表策略在當前市場失效。");
 
   return [head, "", stats, "", openBlock, "", note].join("\n");
 }

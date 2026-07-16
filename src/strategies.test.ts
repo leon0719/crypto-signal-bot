@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { STRATEGIES, intervalMsOf, strategyByName } from "./strategies.js";
+import { intervalMsOf, STRATEGIES, strategyByName } from "./strategies.js";
 
 describe("STRATEGIES", () => {
   test("name/路徑/頻道環境變數皆不重複", () => {
