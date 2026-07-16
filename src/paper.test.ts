@@ -6,6 +6,7 @@ import {
   defaultPaperConfig,
   markToMarket,
   openPositions,
+  type PaperPosition,
   settlePosition,
   sizePosition,
   summarize,
@@ -53,6 +54,61 @@ describe("sizePosition:固定風險 1%", () => {
     expect(short.liq).toBeCloseTo(100 * (1 + 1 / 3), 4);
     expect(long.liq).toBeLessThan(long.stop); // 停損先於強平
     expect(short.liq).toBeGreaterThan(short.stop);
+  });
+});
+
+describe("sizePosition:ATR 動態槓桿", () => {
+  test("低波動(ATR 0.5%)→ 5x,保證金與強平價按 5x 計", () => {
+    // entry 100、stop 99 → stopDist 1 → ATR = 0.5 → 0.5% → 5x
+    const pos = sizePosition(
+      opp({ symbol: "BTCUSDT", dir: "LONG", entry: 100, stop: 99, target: 101.5 }),
+      2000,
+      T0,
+      cfg,
+    );
+    expect(pos.leverage).toBe(5);
+    expect(pos.marginUsed).toBeCloseTo(pos.notional / 5, 6);
+    expect(pos.liq).toBeCloseTo(100 * (1 - 1 / 5), 6);
+  });
+  test("中波動(ATR 2%)→ 3x", () => {
+    // entry 100、stop 96 → stopDist 4 → ATR = 2 → 2% → 3x(邊界屬低風險檔)
+    const pos = sizePosition(
+      opp({ symbol: "ETHUSDT", dir: "LONG", entry: 100, stop: 96, target: 106 }),
+      2000,
+      T0,
+      cfg,
+    );
+    expect(pos.leverage).toBe(3);
+    expect(pos.marginUsed).toBeCloseTo(pos.notional / 3, 6);
+  });
+  test("高波動(ATR 4%)→ 1x,SHORT 強平價在上方", () => {
+    // entry 100、stop 108(SHORT)→ stopDist 8 → ATR = 4 → 4% → 1x
+    const pos = sizePosition(
+      opp({ symbol: "SOLUSDT", dir: "SHORT", entry: 100, stop: 108, target: 88 }),
+      2000,
+      T0,
+      cfg,
+    );
+    expect(pos.leverage).toBe(1);
+    expect(pos.liq).toBeCloseTo(100 * (1 + 1 / 1), 6);
+  });
+  test("舊帳本部位(無 leverage 欄位)結算不受影響", () => {
+    const legacy = sizePosition(
+      opp({ symbol: "BTCUSDT", dir: "LONG", entry: 100, stop: 96, target: 112 }),
+      2000,
+      T0,
+      cfg,
+    );
+    // 模擬舊 JSON:刪掉 leverage 欄位
+    const { leverage: _drop, ...rest } = legacy;
+    const old = rest as PaperPosition;
+    const done = settlePosition(
+      old,
+      [{ openTime: old.entryBarOpen + cfg.intervalMs, high: 113, low: 100, close: 112 }],
+      cfg,
+    );
+    expect(done.status).toBe("TARGET");
+    expect(done.leverage).toBeUndefined(); // 讀取端以 ?? 3 解讀,結算不改寫
   });
 });
 
