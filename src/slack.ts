@@ -18,10 +18,10 @@ export function buildSlackText(opps: Opportunity[]): string {
   return [header, "", ...blocks, "", footer].join("\n");
 }
 
-// 發送到 Slack。缺 env 或 Slack 回 ok:false 皆拋錯,由呼叫端 log。
-export async function postMessage(text: string): Promise<void> {
+// 發送到 Slack。channelId 未指定時用 SLACK_CHANNEL_ID。缺 token/頻道或 Slack 回 ok:false 皆拋錯。
+export async function postMessage(text: string, channelId?: string): Promise<void> {
   const token = process.env.SLACK_BOT_TOKEN;
-  const channel = process.env.SLACK_CHANNEL_ID;
+  const channel = channelId ?? process.env.SLACK_CHANNEL_ID;
   if (!token || !channel) {
     throw new Error("缺少 SLACK_BOT_TOKEN 或 SLACK_CHANNEL_ID 環境變數");
   }

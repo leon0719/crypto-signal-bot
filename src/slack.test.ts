@@ -59,4 +59,18 @@ describe("postMessage", () => {
 
     expect(postMessage("x")).rejects.toThrow("channel_not_found");
   });
+
+  test("帶 channelId → body 用指定頻道,不用 env 預設", async () => {
+    process.env.SLACK_BOT_TOKEN = "xoxb-test";
+    process.env.SLACK_CHANNEL_ID = "C123";
+    const captured = { body: "" };
+    globalThis.fetch = mock(async (_url: string, init: RequestInit) => {
+      captured.body = String(init.body);
+      return new Response(JSON.stringify({ ok: true }));
+    }) as unknown as typeof fetch;
+
+    await postMessage("哈囉", "C999");
+
+    expect(JSON.parse(captured.body).channel).toBe("C999");
+  });
 });
