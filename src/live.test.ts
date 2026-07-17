@@ -1,6 +1,19 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it, mock } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Opportunity } from "./detect.js";
-import { barOpenOf, floorToStep, planOrder, roundToStep } from "./live.js";
+import {
+  barOpenOf,
+  executeLive,
+  floorToStep,
+  type LiveConfig,
+  type LiveIo,
+  planOrder,
+  reconcileLedger,
+  roundToStep,
+} from "./live.js";
+import { readLiveLedger, writeControlState, writeLiveLedger } from "./live-state.js";
 import type { OkxInstrument } from "./okx.js";
 
 const INST: OkxInstrument = {
@@ -73,5 +86,224 @@ describe("planOrder", () => {
   it("停損距離為 0 → skip(fail-closed)", () => {
     const plan = planOrder(opp({ stop: 65000 }), 2000, INST, 0.01);
     expect("skip" in plan).toBe(true);
+  });
+});
+
+afterEach(() => {
+  mock.restore();
+});
+
+// OKX API stub:依 URL 分路;記錄下單 body。
+function stubOkxApi(overrides: Partial<Record<string, unknown>> = {}) {
+  const orders: unknown[] = [];
+  globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const reply = (data: unknown) => new Response(JSON.stringify({ code: "0", msg: "", data }));
+    if (url.includes("/account/balance")) {
+      return reply(
+        overrides.balance ?? [
+          { details: [{ ccy: "USDT", eq: "2000", availBal: "2000", upl: "0" }] },
+        ],
+      );
+    }
+    if (url.includes("/public/instruments")) {
+      return reply([
+        { instId: "BTC-USDT-SWAP", ctVal: "0.01", lotSz: "0.1", minSz: "0.1", tickSz: "0.1" },
+      ]);
+    }
+    if (url.includes("/account/set-leverage")) return reply([{}]);
+    if (url.includes("/trade/order")) {
+      orders.push(init?.body ? JSON.parse(String(init.body)) : null);
+      return reply([{ ordId: "ord-1", sCode: "0", sMsg: "" }]);
+    }
+    if (url.includes("/account/positions")) return reply(overrides.positions ?? []);
+    return new Response(JSON.stringify({ code: "1", msg: `無路由 ${url}`, data: [] }));
+  }) as unknown as typeof fetch;
+  return orders;
+}
+
+async function makeEnv(mode: "dry" | "real", enabled: boolean) {
+  const dir = await mkdtemp(join(tmpdir(), "live-exec-"));
+  const cfg: LiveConfig = {
+    mode,
+    riskPct: 0.01,
+    maxPositions: 4,
+    ledgerPath: join(dir, "ledger.json"),
+    controlPath: join(dir, "control.json"),
+    intervalMs: 4 * 3_600_000,
+  };
+  await writeControlState(cfg.controlPath, { enabled });
+  const notes: string[] = [];
+  const io: LiveIo = {
+    creds: { apiKey: "k", secret: "s", passphrase: "p" },
+    notify: async (t) => {
+      notes.push(t);
+    },
+    lastPrice: async () => null,
+    now: () => 4 * 3_600_000 * 1000, // 固定時間,冪等鍵可預測
+  };
+  return { dir, cfg, io, notes };
+}
+
+describe("executeLive", () => {
+  it("開關關閉:不打 API、不下單", async () => {
+    const { dir, cfg, io } = await makeEnv("real", false);
+    const orders = stubOkxApi();
+    const res = await executeLive([opp()], cfg, io);
+    expect(res.opened).toBe(0);
+    expect(orders.length).toBe(0);
+    await rm(dir, { recursive: true });
+  });
+
+  it("real 模式:下單、寫帳、通報", async () => {
+    const { dir, cfg, io, notes } = await makeEnv("real", true);
+    const orders = stubOkxApi();
+    const res = await executeLive([opp()], cfg, io);
+    expect(res.opened).toBe(1);
+    expect(orders.length).toBe(1);
+    const ledger = await readLiveLedger(cfg.ledgerPath);
+    expect(ledger.positions[0].mode).toBe("real");
+    expect(ledger.positions[0].ordId).toBe("ord-1");
+    expect(notes.some((t) => t.includes("BTCUSDT"))).toBe(true);
+    await rm(dir, { recursive: true });
+  });
+
+  it("dry 模式:不打下單 API,但寫帳(mode:dry)並通報【模擬】", async () => {
+    const { dir, cfg, io, notes } = await makeEnv("dry", true);
+    const orders = stubOkxApi();
+    const res = await executeLive([opp()], cfg, io);
+    expect(res.opened).toBe(1);
+    expect(orders.length).toBe(0); // 不打 /trade/order
+    const ledger = await readLiveLedger(cfg.ledgerPath);
+    expect(ledger.positions[0].mode).toBe("dry");
+    expect(ledger.positions[0].ordId).toBeNull();
+    expect(notes.some((t) => t.includes("【模擬】"))).toBe(true);
+    await rm(dir, { recursive: true });
+  });
+
+  it("冪等:同一根棒同訊號跑兩次只下一次單", async () => {
+    const { dir, cfg, io } = await makeEnv("real", true);
+    const orders = stubOkxApi();
+    await executeLive([opp()], cfg, io);
+    const res2 = await executeLive([opp()], cfg, io);
+    expect(res2.opened).toBe(0);
+    expect(orders.length).toBe(1);
+    await rm(dir, { recursive: true });
+  });
+
+  it("倉位上限:OPEN 達上限後跳過新訊號", async () => {
+    const { dir, cfg, io } = await makeEnv("real", true);
+    cfg.maxPositions = 1;
+    stubOkxApi({
+      positions: [
+        {
+          instId: "ETH-USDT-SWAP",
+          pos: "1",
+          avgPx: "3000",
+          markPx: "3000",
+          upl: "0",
+          uplRatio: "0",
+          lever: "3",
+        },
+      ],
+    });
+    await writeLiveLedger(cfg.ledgerPath, {
+      positions: [
+        {
+          key: "ETHUSDT:LONG:0",
+          symbol: "ETHUSDT",
+          instId: "ETH-USDT-SWAP",
+          dir: "LONG",
+          contracts: "1",
+          entry: 3000,
+          stop: 2900,
+          target: 3200,
+          leverage: 3,
+          mode: "real",
+          ordId: "x",
+          openedAt: "",
+          status: "OPEN",
+        },
+      ],
+    });
+    const res = await executeLive([opp()], cfg, io);
+    expect(res.opened).toBe(0);
+    expect(res.skipped.some((s) => s.includes("上限"))).toBe(true);
+    await rm(dir, { recursive: true });
+  });
+
+  it("餘額查詢失敗:整輪中止並告警(fail-closed)", async () => {
+    const { dir, cfg, io, notes } = await makeEnv("real", true);
+    globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/account/positions")) {
+        return new Response(JSON.stringify({ code: "0", msg: "", data: [] }));
+      }
+      return new Response(JSON.stringify({ code: "50000", msg: "服務異常", data: [] }));
+    }) as unknown as typeof fetch;
+    const res = await executeLive([opp()], cfg, io);
+    expect(res.opened).toBe(0);
+    expect(notes.some((t) => t.includes("告警") || t.includes("失敗"))).toBe(true);
+    await rm(dir, { recursive: true });
+  });
+});
+
+describe("reconcileLedger", () => {
+  it("real:交易所已無倉位 → 標 CLOSED", async () => {
+    const { dir, cfg, io } = await makeEnv("real", true);
+    stubOkxApi({ positions: [] }); // 交易所空倉
+    await writeLiveLedger(cfg.ledgerPath, {
+      positions: [
+        {
+          key: "BTCUSDT:SHORT:0",
+          symbol: "BTCUSDT",
+          instId: "BTC-USDT-SWAP",
+          dir: "SHORT",
+          contracts: "1",
+          entry: 65000,
+          stop: 67000,
+          target: 62000,
+          leverage: 3,
+          mode: "real",
+          ordId: "x",
+          openedAt: "",
+          status: "OPEN",
+        },
+      ],
+    });
+    const ledger = await readLiveLedger(cfg.ledgerPath);
+    const closed = await reconcileLedger(ledger, cfg, io);
+    expect(closed).toEqual(["BTCUSDT:SHORT:0"]);
+    expect(ledger.positions[0].status).toBe("CLOSED");
+    await rm(dir, { recursive: true });
+  });
+
+  it("dry:現價觸及停損 → 標 CLOSED(模擬)", async () => {
+    const { dir, cfg, io } = await makeEnv("dry", true);
+    io.lastPrice = async () => 67500; // SHORT 停損 67000 已觸及
+    await writeLiveLedger(cfg.ledgerPath, {
+      positions: [
+        {
+          key: "BTCUSDT:SHORT:0",
+          symbol: "BTCUSDT",
+          instId: "BTC-USDT-SWAP",
+          dir: "SHORT",
+          contracts: "1",
+          entry: 65000,
+          stop: 67000,
+          target: 62000,
+          leverage: 3,
+          mode: "dry",
+          ordId: null,
+          openedAt: "",
+          status: "OPEN",
+        },
+      ],
+    });
+    const ledger = await readLiveLedger(cfg.ledgerPath);
+    const closed = await reconcileLedger(ledger, cfg, io);
+    expect(closed.length).toBe(1);
+    expect(ledger.positions[0].closeReason).toContain("模擬");
+    await rm(dir, { recursive: true });
   });
 });
