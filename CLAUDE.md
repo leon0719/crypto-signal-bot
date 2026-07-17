@@ -10,6 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `bun run check` — gate before committing: `biome check .` + `tsc --noEmit`. (`bun run type-check` for tsc only.)
 - `bunx wrangler deploy` — deploy from local. `bunx wrangler deploy --dry-run` — verify the bundle without shipping.
 - `bun run richmenu <token> <image.png>` — one-time LINE rich-menu setup (`scripts/setup-richmenu.ts`).
+- `bun run live:<on|off|status|balance|positions|report>` — 實盤自動下單控制與查詢(`scripts/live-ctl.ts`,需 `.env.local` 的 OKX 憑證)。緊急平倉刻意無捷徑:`bun run live panic --yes`。
 - Secrets (set once, persist across deploys): `bunx wrangler secret put LINE_CHANNEL_ACCESS_TOKEN` and `bunx wrangler secret put LINE_CHANNEL_SECRET`.
 
 ## Conventions
