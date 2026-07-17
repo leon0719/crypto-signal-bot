@@ -41,6 +41,14 @@ Three independent fetches run **concurrently** in `handleSingle`: the **higher-t
 - **Fuzzy symbol suggestions** (`suggest.js`): on `notFound`, `suggestSymbols` ranks the exchange's available USDT bases (prefix > user-typo-prefix > substring > same-first-letter edit-distance; different-first-letter is discarded as noise). The instrument list is cached per isolate (`bybit.ts` `fetchUsdtBases`, 10-min TTL) and only fetched on the error path.
 - **Quick replies** use LINE `message` actions whose `text` re-enters `handleText` (e.g. an interval button sends `"BTCUSDT 4h"`), preserving market/leverage via `marketSuffix`. Built through the single `quickReply(pairs)` helper in `format.js`.
 
+### 實盤自動下單(OKX)
+
+4h 策略新機會可接 OKX 真實下單(`src/okx.ts` 零相依 v5 client、`src/live.ts` 協調、
+`src/control.ts` Slack 指令)。三重防護:Slack 開關(`./data/live-control.json`,fail-closed)、
+`LIVE_MODE=dry|real`(預設 dry)、逐筆護欄(同幣去重/倉位上限/冪等鍵)。出場靠下單時的
+attached TP/SL(交易所端),排程器掛掉不影響保護。`緊急平倉`只平 live ledger 內的自動倉位。
+OKX MCP 不參與自動化,僅供對話中手動查倉/干預。
+
 ### Testing model
 
 `bun:test`, no miniflare/wrangler runtime. Tests stub `globalThis.fetch` with `mock()` (route by URL substring — `/market/kline`, `/market/tickers`, `/instruments-info`, `/message/reply`, `/chat/loading/start`) and `mock.restore()` in `afterEach`. `index.test.ts` is the end-to-end check: it signs a body (via `sign()` re-exported from `line.test.ts`), calls `worker.fetch` with a fake `ExecutionContext` that collects `waitUntil` promises, then `await`s them and asserts a reply was POSTed. `bun test` and `tsc --noEmit` both run in CI (`.github/workflows/ci.yml`).
