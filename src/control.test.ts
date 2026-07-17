@@ -575,3 +575,13 @@ describe("runControlLoop", () => {
     await rm(dir, { recursive: true });
   }, 5_000);
 });
+
+describe("parseCommand mention 前綴", () => {
+  it("開頭 @bot mention 會被剝除後再比對", () => {
+    expect(parseCommand("<@U0AITEAM> 指令")).toBe("help");
+    expect(parseCommand("<@U0AITEAM>狀態")).toBe("status");
+    expect(parseCommand(" <@U0AITEAM>  緊急平倉 ")).toBe("panic");
+    expect(parseCommand("<@U0AITEAM> 不是指令")).toBeNull();
+    expect(parseCommand("指令 <@U0AITEAM>")).toBeNull(); // 只剝開頭,不動其他位置
+  });
+});

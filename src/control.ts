@@ -38,7 +38,9 @@ const COMMANDS: Record<string, ControlCommand> = {
 };
 
 export function parseCommand(text: string): ControlCommand | null {
-  return COMMANDS[text.trim()] ?? null;
+  // 剝除開頭的 @bot mention(Slack 原文格式 <@U…>),讓「@bot 指令」與「指令」都能匹配。
+  const stripped = text.trim().replace(/^<@[A-Z0-9]+>\s*/, "");
+  return COMMANDS[stripped.trim()] ?? null;
 }
 
 export interface ControlDeps {
