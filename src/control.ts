@@ -232,14 +232,24 @@ export async function pollOnce(deps: ControlDeps, lastTs: string): Promise<strin
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // 常駐控制迴圈:每 intervalMs 輪詢一次;單輪錯誤只記 log,迴圈不退出。
+// 例外:missing_scope(bot token 缺 channels:history/groups:history)不重啟不會自癒,
+// 記一次 log 後停止輪詢,避免每 30 秒噴錯塞爆 log;Slack 通知(chat.postMessage)不受影響。
 // 起始 lastTs = 現在(不重播啟動前的歷史指令)。
-export async function runControlLoop(deps: ControlDeps, intervalMs = 30_000): Promise<never> {
+export async function runControlLoop(deps: ControlDeps, intervalMs = 30_000): Promise<void> {
   let lastTs = (Date.now() / 1000).toFixed(6);
   while (true) {
     try {
       lastTs = await pollOnce(deps, lastTs);
     } catch (e) {
-      console.error(`[控制迴圈] ${(e as Error).message}`);
+      const msg = (e as Error).message;
+      if (msg.includes("missing_scope")) {
+        console.error(
+          "[控制迴圈] bot token 缺讀取頻道權限(missing_scope),停止 Slack 指令輪詢。" +
+            "改用本機 CLI:bun scripts/live-ctl.ts;要啟用 Slack 遙控請補 channels:history + groups:history scope 後重啟。",
+        );
+        return;
+      }
+      console.error(`[控制迴圈] ${msg}`);
     }
     await sleep(intervalMs);
   }

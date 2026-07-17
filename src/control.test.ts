@@ -2,7 +2,13 @@ import { afterEach, describe, expect, it, mock } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type ControlDeps, handleCommand, parseCommand, pollOnce } from "./control.js";
+import {
+  type ControlDeps,
+  handleCommand,
+  parseCommand,
+  pollOnce,
+  runControlLoop,
+} from "./control.js";
 import {
   readControlState,
   readLiveLedger,
@@ -539,4 +545,33 @@ describe("pollOnce", () => {
     expect(posts.length).toBe(0);
     await rm(dir, { recursive: true });
   });
+});
+
+describe("runControlLoop", () => {
+  it("missing_scope(權限不可自癒)→ 記 log 後停止輪詢,迴圈正常返回", async () => {
+    const { dir, deps } = await makeDeps();
+    const fetchMock = mock(
+      async () => new Response(JSON.stringify({ ok: false, error: "missing_scope" })),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    // 若未停止,迴圈永不返回 → 測試會逾時;停止則立即 resolve。
+    await runControlLoop(deps, 10);
+    expect(fetchMock.mock.calls.length).toBe(1); // 不重試
+    await rm(dir, { recursive: true });
+  }, 5_000);
+
+  it("一般錯誤(如網路)只記 log 繼續輪詢,不停止", async () => {
+    const { dir, deps } = await makeDeps();
+    let n = 0;
+    globalThis.fetch = mock(async () => {
+      n++;
+      if (n === 1) throw new Error("網路斷線");
+      if (n === 2) return new Response(JSON.stringify({ ok: true, messages: [] }));
+      // 第三輪用 missing_scope 讓迴圈結束,測試才能返回
+      return new Response(JSON.stringify({ ok: false, error: "missing_scope" }));
+    }) as unknown as typeof fetch;
+    await runControlLoop(deps, 10);
+    expect(n).toBe(3); // 網路錯誤與正常輪各一次後才因 missing_scope 停止
+    await rm(dir, { recursive: true });
+  }, 5_000);
 });
