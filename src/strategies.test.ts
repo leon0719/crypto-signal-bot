@@ -19,6 +19,11 @@ describe("STRATEGIES", () => {
     expect(s.htf).toBe("4h");
     expect(s.channelEnv).toBe("SLACK_CHANNEL_ID_1H");
   });
+
+  test("只有 4h 開實盤下單", () => {
+    expect(strategyByName("4h").liveTrading).toBe(true);
+    expect(strategyByName("1h").liveTrading).toBe(false);
+  });
 });
 
 describe("strategyByName", () => {

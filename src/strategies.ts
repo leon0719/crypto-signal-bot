@@ -9,6 +9,7 @@ export interface Strategy {
   pushSignals: boolean; // 是否推新機會訊號到 Slack
   channelEnv: string; // 成績單使用的 Slack channel 環境變數名
   baseline: string; // 樣本足夠時成績單顯示的基準註解
+  liveTrading: boolean; // 是否把新機會接到 OKX 實盤下單(仍受 Slack 開關與 LIVE_MODE 控制)
 }
 
 export const STRATEGIES: Strategy[] = [
@@ -21,6 +22,7 @@ export const STRATEGIES: Strategy[] = [
     pushSignals: true,
     channelEnv: "SLACK_CHANNEL_ID",
     baseline: "基準:回測 4h avgR ≈ +0.10;明顯低於此值才代表策略在當前市場失效。",
+    liveTrading: true,
   },
   {
     name: "1h",
@@ -31,6 +33,7 @@ export const STRATEGIES: Strategy[] = [
     pushSignals: false,
     channelEnv: "SLACK_CHANNEL_ID_1H",
     baseline: "基準:回測 1h avgR ≈ +0.05;明顯低於此值才代表策略在當前市場失效。",
+    liveTrading: false,
   },
 ];
 
