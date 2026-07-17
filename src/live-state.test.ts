@@ -1,11 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type LivePosition,
   readControlState,
   readLiveLedger,
+  withFileLock,
   writeControlState,
   writeLiveLedger,
 } from "./live-state.js";
@@ -53,6 +54,34 @@ describe("live-state", () => {
     const p = join(dir, "control.json");
     await Bun.write(p, "not json");
     expect((await readControlState(p)).enabled).toBe(false);
+    await rm(dir, { recursive: true });
+  });
+
+  it("withFileLock:同一資源上的兩個臨界區不交錯", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lock-"));
+    const p = join(dir, "ledger.json");
+    const events: string[] = [];
+    const critical = (name: string) => () =>
+      withFileLock(p, async () => {
+        events.push(`${name}:in`);
+        await new Promise((r) => setTimeout(r, 50));
+        events.push(`${name}:out`);
+      });
+    await Promise.all([critical("a")(), critical("b")()]);
+    // 不論誰先,in/out 必須成對相鄰(不交錯)
+    expect(events[0].split(":")[0]).toBe(events[1].split(":")[0]);
+    expect(events[2].split(":")[0]).toBe(events[3].split(":")[0]);
+    await rm(dir, { recursive: true });
+  });
+
+  it("withFileLock:殘留死鎖超過 staleMs 會被接管", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lock-"));
+    const p = join(dir, "ledger.json");
+    await mkdir(`${p}.lock`); // 模擬殘留鎖
+    const past = new Date(Date.now() - 10_000);
+    await utimes(`${p}.lock`, past, past); // mtime 拉舊
+    const result = await withFileLock(p, async () => "ok", { staleMs: 5_000 });
+    expect(result).toBe("ok");
     await rm(dir, { recursive: true });
   });
 });

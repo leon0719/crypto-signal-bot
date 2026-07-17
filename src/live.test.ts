@@ -246,6 +246,40 @@ describe("executeLive", () => {
     expect(notes.some((t) => t.includes("告警") || t.includes("失敗"))).toBe(true);
     await rm(dir, { recursive: true });
   });
+
+  it("單筆失敗:告警後繼續下一筆(失敗不拖垮整輪)", async () => {
+    const { dir, cfg, io, notes } = await makeEnv("real", true);
+    const orders: unknown[] = [];
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const reply = (data: unknown) => new Response(JSON.stringify({ code: "0", msg: "", data }));
+      if (url.includes("/account/balance"))
+        return reply([{ details: [{ ccy: "USDT", eq: "2000", availBal: "2000", upl: "0" }] }]);
+      if (url.includes("/public/instruments")) {
+        // ETH 規格查詢回業務錯誤(不重試);BTC 正常
+        if (url.includes("ETH-USDT-SWAP"))
+          return new Response(JSON.stringify({ code: "51001", msg: "合約不存在", data: [] }));
+        return reply([
+          { instId: "BTC-USDT-SWAP", ctVal: "0.01", lotSz: "0.1", minSz: "0.1", tickSz: "0.1" },
+        ]);
+      }
+      if (url.includes("/account/set-leverage")) return reply([{}]);
+      if (url.includes("/trade/order")) {
+        orders.push(init?.body ? JSON.parse(String(init.body)) : null);
+        return reply([{ ordId: "ord-1", sCode: "0", sMsg: "" }]);
+      }
+      if (url.includes("/account/positions")) return reply([]);
+      return new Response(JSON.stringify({ code: "1", msg: `無路由 ${url}`, data: [] }));
+    }) as unknown as typeof fetch;
+
+    const ethOpp = opp({ symbol: "ETHUSDT", entry: 3000, stop: 3100, target: 2850 });
+    const res = await executeLive([ethOpp, opp()], cfg, io);
+    expect(res.opened).toBe(1); // ETH 失敗,BTC 照下
+    expect(orders.length).toBe(1);
+    expect(res.skipped.some((s) => s.includes("ETHUSDT"))).toBe(true);
+    expect(notes.some((t) => t.includes("🚨") && t.includes("ETHUSDT"))).toBe(true);
+    await rm(dir, { recursive: true });
+  });
 });
 
 describe("reconcileLedger", () => {

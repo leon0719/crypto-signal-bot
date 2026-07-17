@@ -6,6 +6,7 @@ import {
   type LivePosition,
   readControlState,
   readLiveLedger,
+  withFileLock,
   writeLiveLedger,
 } from "./live-state.js";
 import {
@@ -160,87 +161,89 @@ export async function executeLive(
   const control = await readControlState(cfg.controlPath);
   if (!control.enabled) return { opened: 0, skipped: ["自動下單未啟動"] };
 
-  const ledger = await readLiveLedger(cfg.ledgerPath);
-  const reconciled = await reconcileLedger(ledger, cfg, io).catch((e) => {
-    skipped.push(`對帳失敗:${(e as Error).message}`);
-    return [] as string[];
-  });
-  if (reconciled.length > 0) await writeLiveLedger(cfg.ledgerPath, ledger);
-  if (news.length === 0) return { opened: 0, skipped };
+  return withFileLock(cfg.ledgerPath, async () => {
+    const ledger = await readLiveLedger(cfg.ledgerPath);
+    const reconciled = await reconcileLedger(ledger, cfg, io).catch((e) => {
+      skipped.push(`對帳失敗:${(e as Error).message}`);
+      return [] as string[];
+    });
+    if (reconciled.length > 0) await writeLiveLedger(cfg.ledgerPath, ledger);
+    if (news.length === 0) return { opened: 0, skipped };
 
-  let equity: number;
-  try {
-    equity = (await fetchUsdtBalance(io.creds)).equity;
-  } catch (e) {
-    await io.notify(`🚨 [實盤] 餘額查詢失敗,本輪全部放棄:${(e as Error).message}`);
-    return { opened: 0, skipped: ["餘額查詢失敗"] };
-  }
-
-  let opened = 0;
-  const tagOf = (o: Opportunity) => `${o.symbol} ${o.dir === "SHORT" ? "做空" : "做多"}`;
-  for (const o of news) {
-    const key = `${o.symbol}:${o.dir}:${barOpenOf(io.now(), cfg.intervalMs)}`;
-    const opens = ledger.positions.filter((p) => p.status === "OPEN" && p.mode === cfg.mode);
-    if (ledger.positions.some((p) => p.key === key)) {
-      skipped.push(`${tagOf(o)}:本棒已下過單(冪等)`);
-      continue;
-    }
-    if (opens.some((p) => p.symbol === o.symbol)) {
-      skipped.push(`${tagOf(o)}:已有同幣自動倉位`);
-      continue;
-    }
-    if (opens.length >= cfg.maxPositions) {
-      skipped.push(`${tagOf(o)}:自動倉位已達上限 ${cfg.maxPositions}`);
-      continue;
-    }
-
+    let equity: number;
     try {
-      const inst = await fetchInstrument(io.creds, instIdOf(o.symbol));
-      const plan = planOrder(o, equity, inst, cfg.riskPct);
-      if ("skip" in plan) {
-        skipped.push(`${tagOf(o)}:${plan.skip}`);
-        await io.notify(`⚠️ [實盤] 放棄 ${tagOf(o)}:${plan.skip}`);
+      equity = (await fetchUsdtBalance(io.creds)).equity;
+    } catch (e) {
+      await io.notify(`🚨 [實盤] 餘額查詢失敗,本輪全部放棄:${(e as Error).message}`);
+      return { opened: 0, skipped: ["餘額查詢失敗"] };
+    }
+
+    let opened = 0;
+    const tagOf = (o: Opportunity) => `${o.symbol} ${o.dir === "SHORT" ? "做空" : "做多"}`;
+    for (const o of news) {
+      const key = `${o.symbol}:${o.dir}:${barOpenOf(io.now(), cfg.intervalMs)}`;
+      const opens = ledger.positions.filter((p) => p.status === "OPEN" && p.mode === cfg.mode);
+      if (ledger.positions.some((p) => p.key === key)) {
+        skipped.push(`${tagOf(o)}:本棒已下過單(冪等)`);
         continue;
       }
-      let ordId: string | null = null;
-      if (cfg.mode === "real") {
-        await setLeverage(io.creds, plan.instId, plan.leverage);
-        ordId = await placeMarketWithTpSl(io.creds, {
-          instId: plan.instId,
-          side: plan.side,
-          sz: plan.contracts,
-          tpPx: plan.tpPx,
-          slPx: plan.slPx,
-        });
+      if (opens.some((p) => p.symbol === o.symbol)) {
+        skipped.push(`${tagOf(o)}:已有同幣自動倉位`);
+        continue;
       }
-      const pos: LivePosition = {
-        key,
-        symbol: o.symbol,
-        instId: plan.instId,
-        dir: o.dir,
-        contracts: plan.contracts,
-        entry: o.entry,
-        stop: o.stop,
-        target: o.target,
-        leverage: plan.leverage,
-        mode: cfg.mode,
-        ordId,
-        openedAt: new Date(io.now()).toISOString(),
-        status: "OPEN",
-      };
-      ledger.positions.push(pos);
-      opened++;
-      const prefix = cfg.mode === "dry" ? "【模擬】" : "";
-      await io.notify(
-        `${o.dir === "SHORT" ? "🔴" : "🟢"} ${prefix}[實盤] ${tagOf(o)} ${plan.contracts} 張(${plan.leverage}x)\n` +
-          `   進場 ~${o.entry} ｜ 停損 ${plan.slPx} ｜ 目標 ${plan.tpPx}\n` +
-          `   名目 ${fmtUsdt(plan.notional)} ｜ 保證金 ${fmtUsdt(plan.margin)}${ordId ? ` ｜ 單號 ${ordId}` : ""}`,
-      );
-    } catch (e) {
-      skipped.push(`${tagOf(o)}:下單失敗 ${(e as Error).message}`);
-      await io.notify(`🚨 [實盤] ${tagOf(o)} 下單失敗:${(e as Error).message}`);
+      if (opens.length >= cfg.maxPositions) {
+        skipped.push(`${tagOf(o)}:自動倉位已達上限 ${cfg.maxPositions}`);
+        continue;
+      }
+
+      try {
+        const inst = await fetchInstrument(io.creds, instIdOf(o.symbol));
+        const plan = planOrder(o, equity, inst, cfg.riskPct);
+        if ("skip" in plan) {
+          skipped.push(`${tagOf(o)}:${plan.skip}`);
+          await io.notify(`⚠️ [實盤] 放棄 ${tagOf(o)}:${plan.skip}`);
+          continue;
+        }
+        let ordId: string | null = null;
+        if (cfg.mode === "real") {
+          await setLeverage(io.creds, plan.instId, plan.leverage);
+          ordId = await placeMarketWithTpSl(io.creds, {
+            instId: plan.instId,
+            side: plan.side,
+            sz: plan.contracts,
+            tpPx: plan.tpPx,
+            slPx: plan.slPx,
+          });
+        }
+        const pos: LivePosition = {
+          key,
+          symbol: o.symbol,
+          instId: plan.instId,
+          dir: o.dir,
+          contracts: plan.contracts,
+          entry: o.entry,
+          stop: o.stop,
+          target: o.target,
+          leverage: plan.leverage,
+          mode: cfg.mode,
+          ordId,
+          openedAt: new Date(io.now()).toISOString(),
+          status: "OPEN",
+        };
+        ledger.positions.push(pos);
+        opened++;
+        const prefix = cfg.mode === "dry" ? "【模擬】" : "";
+        await io.notify(
+          `${o.dir === "SHORT" ? "🔴" : "🟢"} ${prefix}[實盤] ${tagOf(o)} ${plan.contracts} 張(${plan.leverage}x)\n` +
+            `   進場 ~${o.entry} ｜ 停損 ${plan.slPx} ｜ 目標 ${plan.tpPx}\n` +
+            `   名目 ${fmtUsdt(plan.notional)} ｜ 保證金 ${fmtUsdt(plan.margin)}${ordId ? ` ｜ 單號 ${ordId}` : ""}`,
+        );
+      } catch (e) {
+        skipped.push(`${tagOf(o)}:下單失敗 ${(e as Error).message}`);
+        await io.notify(`🚨 [實盤] ${tagOf(o)} 下單失敗:${(e as Error).message}`);
+      }
     }
-  }
-  await writeLiveLedger(cfg.ledgerPath, ledger);
-  return { opened, skipped };
+    await writeLiveLedger(cfg.ledgerPath, ledger);
+    return { opened, skipped };
+  });
 }
