@@ -32,6 +32,8 @@ export async function postMessage(text: string, channelId?: string): Promise<voi
       "Content-Type": "application/json; charset=utf-8",
     },
     body: JSON.stringify({ channel, text }),
+    // 逾時中止,避免掛住排程。
+    signal: AbortSignal.timeout(10_000),
   });
   const data = (await resp.json()) as { ok: boolean; error?: string };
   if (!data.ok) throw new Error(`Slack 發送失敗:${data.error ?? "unknown"}`);
