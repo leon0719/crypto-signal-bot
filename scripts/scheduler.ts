@@ -35,27 +35,36 @@ async function runScript(args: string[]): Promise<void> {
 // 需要 SLACK_BOT_TOKEN + SLACK_CONTROL_CHANNEL_ID + OKX 憑證;缺任一則停用(純推播部署不受影響)。
 const controlChannel = process.env.SLACK_CONTROL_CHANNEL_ID;
 const slackToken = process.env.SLACK_BOT_TOKEN;
-if (controlChannel && slackToken && process.env.OKX_API_KEY) {
-  const cfg = liveConfigFromEnv(intervalMsOf("4h"));
-  const deps = {
-    cfg,
-    creds: credsFromEnv(),
-    post: (text: string) => postMessage(text, controlChannel),
-    runReport: async () => {
-      await runScript(["scripts/paper-report.ts", "4h"]);
-    },
-    nextScanText: () => nextRunTime(new Date(), RUN_HOURS, RUN_MINUTE).toISOString(),
-    slackToken,
-    channel: controlChannel,
-  };
-  // 啟動宣告:重啟後告知目前開關狀態,避免以為還開著/關著。
-  const state = await readControlState(cfg.controlPath);
-  await postMessage(
-    `♻️ 排程器已啟動。自動下單:${state.enabled ? "開啟" : "關閉"}(模式:${cfg.mode})\n輸入「指令」查看可用操作`,
-    controlChannel,
-  ).catch((e) => console.error(`啟動宣告失敗:${(e as Error).message}`));
-  void runControlLoop(deps);
-  console.log("[控制迴圈] 已啟動(每 30 秒輪詢 Slack 控制頻道)");
+const hasOkxCreds = Boolean(
+  process.env.OKX_API_KEY && process.env.OKX_API_SECRET && process.env.OKX_API_PASSPHRASE,
+);
+if (controlChannel && slackToken && hasOkxCreds) {
+  // 見 I5:啟動失敗(OKX 憑證有誤/檔案系統問題等)不可讓整個排程器 crash loop,
+  // 掃描迴圈是主功能,必須不受控制迴圈啟動失敗影響。
+  try {
+    const cfg = liveConfigFromEnv(intervalMsOf("4h"));
+    const deps = {
+      cfg,
+      creds: credsFromEnv(),
+      post: (text: string) => postMessage(text, controlChannel),
+      runReport: async () => {
+        await runScript(["scripts/paper-report.ts", "4h"]);
+      },
+      nextScanText: () => nextRunTime(new Date(), RUN_HOURS, RUN_MINUTE).toISOString(),
+      slackToken,
+      channel: controlChannel,
+    };
+    // 啟動宣告:重啟後告知目前開關狀態,避免以為還開著/關著。
+    const state = await readControlState(cfg.controlPath);
+    await postMessage(
+      `♻️ 排程器已啟動。自動下單:${state.enabled ? "開啟" : "關閉"}(模式:${cfg.mode})\n輸入「指令」查看可用操作`,
+      controlChannel,
+    ).catch((e) => console.error(`啟動宣告失敗:${(e as Error).message}`));
+    void runControlLoop(deps);
+    console.log("[控制迴圈] 已啟動(每 30 秒輪詢 Slack 控制頻道)");
+  } catch (e) {
+    console.error(`[控制迴圈] 啟動失敗:${(e as Error).message},實盤控制停用`);
+  }
 } else {
   console.log("[控制迴圈] 未設定 SLACK_CONTROL_CHANNEL_ID/OKX 憑證,實盤控制停用");
 }

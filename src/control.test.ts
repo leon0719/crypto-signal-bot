@@ -3,7 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ControlDeps, handleCommand, parseCommand, pollOnce } from "./control.js";
-import { readControlState, writeControlState, writeLiveLedger } from "./live-state.js";
+import {
+  readControlState,
+  readLiveLedger,
+  writeControlState,
+  writeLiveLedger,
+} from "./live-state.js";
 
 afterEach(() => {
   mock.restore();
@@ -107,6 +112,26 @@ describe("handleCommand", () => {
         closeCalls.push(String(init?.body));
         return new Response(JSON.stringify({ code: "0", msg: "", data: [{}] }));
       }
+      if (url.includes("/account/positions")) {
+        // 對帳:交易所倉位方向與帳本(SHORT)一致 → pos < 0
+        return new Response(
+          JSON.stringify({
+            code: "0",
+            msg: "",
+            data: [
+              {
+                instId: "BTC-USDT-SWAP",
+                pos: "-1",
+                avgPx: "65000",
+                markPx: "65000",
+                upl: "0",
+                uplRatio: "0",
+                lever: "3",
+              },
+            ],
+          }),
+        );
+      }
       return new Response(JSON.stringify({ code: "0", msg: "", data: [] }));
     }) as unknown as typeof fetch;
     const text = await handleCommand("panic", deps);
@@ -163,6 +188,34 @@ describe("handleCommand", () => {
         }
         return new Response(JSON.stringify({ code: "0", msg: "", data: [{}] }));
       }
+      if (url.includes("/account/positions")) {
+        return new Response(
+          JSON.stringify({
+            code: "0",
+            msg: "",
+            data: [
+              {
+                instId: "BTC-USDT-SWAP",
+                pos: "-1",
+                avgPx: "65000",
+                markPx: "65000",
+                upl: "0",
+                uplRatio: "0",
+                lever: "3",
+              },
+              {
+                instId: "ETH-USDT-SWAP",
+                pos: "1",
+                avgPx: "3000",
+                markPx: "3000",
+                upl: "0",
+                uplRatio: "0",
+                lever: "3",
+              },
+            ],
+          }),
+        );
+      }
       return new Response(JSON.stringify({ code: "0", msg: "", data: [] }));
     }) as unknown as typeof fetch;
     const text = await handleCommand("panic", deps);
@@ -172,6 +225,236 @@ describe("handleCommand", () => {
     const eth = ledger.positions.find((p) => p.symbol === "ETHUSDT");
     expect(btc?.status).toBe("OPEN"); // 失敗的保持 OPEN
     expect(eth?.status).toBe("CLOSED"); // 成功的照平
+    await rm(dir, { recursive: true });
+  });
+
+  it("I3:交易所端已無倉位 → 對帳標 CLOSED,不呼叫 closePosition", async () => {
+    const { dir, deps } = await makeDeps("real");
+    await writeControlState(deps.cfg.controlPath, { enabled: true });
+    await writeLiveLedger(deps.cfg.ledgerPath, {
+      positions: [
+        {
+          key: "BTCUSDT:SHORT:0",
+          symbol: "BTCUSDT",
+          instId: "BTC-USDT-SWAP",
+          dir: "SHORT",
+          contracts: "1",
+          entry: 65000,
+          stop: 67000,
+          target: 62000,
+          leverage: 3,
+          mode: "real",
+          ordId: "x",
+          openedAt: "",
+          status: "OPEN",
+        },
+      ],
+    });
+    const closeCalls: string[] = [];
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/trade/close-position")) {
+        closeCalls.push(String(init?.body));
+        return new Response(JSON.stringify({ code: "0", msg: "", data: [{}] }));
+      }
+      if (url.includes("/account/positions")) {
+        return new Response(JSON.stringify({ code: "0", msg: "", data: [] })); // 交易所已空倉
+      }
+      return new Response(JSON.stringify({ code: "0", msg: "", data: [] }));
+    }) as unknown as typeof fetch;
+    const text = await handleCommand("panic", deps);
+    expect(closeCalls.length).toBe(0);
+    const ledger = await readLiveLedger(deps.cfg.ledgerPath);
+    expect(ledger.positions[0].status).toBe("CLOSED");
+    expect(ledger.positions[0].closeReason).toContain("已出場");
+    expect(text).toContain("BTCUSDT");
+    await rm(dir, { recursive: true });
+  });
+
+  it("I3:交易所倉位方向與帳本不符 → 不平倉、保持 OPEN、提示疑似手動倉", async () => {
+    const { dir, deps } = await makeDeps("real");
+    await writeControlState(deps.cfg.controlPath, { enabled: true });
+    await writeLiveLedger(deps.cfg.ledgerPath, {
+      positions: [
+        {
+          key: "BTCUSDT:SHORT:0",
+          symbol: "BTCUSDT",
+          instId: "BTC-USDT-SWAP",
+          dir: "SHORT",
+          contracts: "1",
+          entry: 65000,
+          stop: 67000,
+          target: 62000,
+          leverage: 3,
+          mode: "real",
+          ordId: "x",
+          openedAt: "",
+          status: "OPEN",
+        },
+      ],
+    });
+    const closeCalls: string[] = [];
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/trade/close-position")) {
+        closeCalls.push(String(init?.body));
+        return new Response(JSON.stringify({ code: "0", msg: "", data: [{}] }));
+      }
+      if (url.includes("/account/positions")) {
+        // 帳本是 SHORT,但交易所是多倉 → 方向不符
+        return new Response(
+          JSON.stringify({
+            code: "0",
+            msg: "",
+            data: [
+              {
+                instId: "BTC-USDT-SWAP",
+                pos: "1",
+                avgPx: "65000",
+                markPx: "65000",
+                upl: "0",
+                uplRatio: "0",
+                lever: "3",
+              },
+            ],
+          }),
+        );
+      }
+      return new Response(JSON.stringify({ code: "0", msg: "", data: [] }));
+    }) as unknown as typeof fetch;
+    const text = await handleCommand("panic", deps);
+    expect(closeCalls.length).toBe(0);
+    const ledger = await readLiveLedger(deps.cfg.ledgerPath);
+    expect(ledger.positions[0].status).toBe("OPEN");
+    expect(text).toContain("疑似手動倉");
+    await rm(dir, { recursive: true });
+  });
+
+  it("I3:對帳(fetchPositions)失敗 → 中止整個平倉流程,不執行任何平倉", async () => {
+    const { dir, deps } = await makeDeps("real");
+    await writeControlState(deps.cfg.controlPath, { enabled: true });
+    await writeLiveLedger(deps.cfg.ledgerPath, {
+      positions: [
+        {
+          key: "BTCUSDT:SHORT:0",
+          symbol: "BTCUSDT",
+          instId: "BTC-USDT-SWAP",
+          dir: "SHORT",
+          contracts: "1",
+          entry: 65000,
+          stop: 67000,
+          target: 62000,
+          leverage: 3,
+          mode: "real",
+          ordId: "x",
+          openedAt: "",
+          status: "OPEN",
+        },
+      ],
+    });
+    const closeCalls: string[] = [];
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/trade/close-position")) {
+        closeCalls.push(String(init?.body));
+        return new Response(JSON.stringify({ code: "0", msg: "", data: [{}] }));
+      }
+      if (url.includes("/account/positions")) {
+        return new Response(JSON.stringify({ code: "50000", msg: "服務異常", data: [] }));
+      }
+      return new Response(JSON.stringify({ code: "0", msg: "", data: [] }));
+    }) as unknown as typeof fetch;
+    const text = await handleCommand("panic", deps);
+    expect(closeCalls.length).toBe(0);
+    const ledger = await readLiveLedger(deps.cfg.ledgerPath);
+    expect(ledger.positions[0].status).toBe("OPEN"); // 未變動
+    expect(text).toContain("對帳失敗");
+    await rm(dir, { recursive: true });
+  });
+
+  it("I4:cfg.mode 為 dry 但帳本有 real OPEN → panic 仍發出真實平倉", async () => {
+    const { dir, deps } = await makeDeps("dry");
+    await writeControlState(deps.cfg.controlPath, { enabled: true });
+    await writeLiveLedger(deps.cfg.ledgerPath, {
+      positions: [
+        {
+          key: "BTCUSDT:SHORT:0",
+          symbol: "BTCUSDT",
+          instId: "BTC-USDT-SWAP",
+          dir: "SHORT",
+          contracts: "1",
+          entry: 65000,
+          stop: 67000,
+          target: 62000,
+          leverage: 3,
+          mode: "real",
+          ordId: "x",
+          openedAt: "",
+          status: "OPEN",
+        },
+      ],
+    });
+    const closeCalls: string[] = [];
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/trade/close-position")) {
+        closeCalls.push(String(init?.body));
+        return new Response(JSON.stringify({ code: "0", msg: "", data: [{}] }));
+      }
+      if (url.includes("/account/positions")) {
+        return new Response(
+          JSON.stringify({
+            code: "0",
+            msg: "",
+            data: [
+              {
+                instId: "BTC-USDT-SWAP",
+                pos: "-1",
+                avgPx: "65000",
+                markPx: "65000",
+                upl: "0",
+                uplRatio: "0",
+                lever: "3",
+              },
+            ],
+          }),
+        );
+      }
+      return new Response(JSON.stringify({ code: "0", msg: "", data: [] }));
+    }) as unknown as typeof fetch;
+    const text = await handleCommand("panic", deps);
+    expect(closeCalls.length).toBe(1);
+    const ledger = await readLiveLedger(deps.cfg.ledgerPath);
+    expect(ledger.positions[0].status).toBe("CLOSED");
+    expect(ledger.positions[0].closeReason).toBe("緊急平倉");
+    expect(text).toContain("BTCUSDT");
+    await rm(dir, { recursive: true });
+  });
+
+  it("I4:狀態查詢在 dry 模式下提示帳本仍有 real 倉位", async () => {
+    const { dir, deps } = await makeDeps("dry");
+    await writeLiveLedger(deps.cfg.ledgerPath, {
+      positions: [
+        {
+          key: "BTCUSDT:SHORT:0",
+          symbol: "BTCUSDT",
+          instId: "BTC-USDT-SWAP",
+          dir: "SHORT",
+          contracts: "1",
+          entry: 65000,
+          stop: 67000,
+          target: 62000,
+          leverage: 3,
+          mode: "real",
+          ordId: "x",
+          openedAt: "",
+          status: "OPEN",
+        },
+      ],
+    });
+    const text = await handleCommand("status", deps);
+    expect(text).toContain("⚠️");
+    expect(text).toContain("1 筆 real 倉位");
     await rm(dir, { recursive: true });
   });
 
@@ -217,6 +500,32 @@ describe("pollOnce", () => {
     // 先啟動後停止 → 最終關閉
     expect((await readControlState(deps.cfg.controlPath)).enabled).toBe(false);
     expect(posts.length).toBe(2); // 兩個指令各回覆一次
+    await rm(dir, { recursive: true });
+  });
+
+  it("I2:回覆失敗只記 log,lastTs 仍前進且後續訊息繼續處理(開關狀態仍被更新)", async () => {
+    const { dir, deps } = await makeDeps();
+    deps.post = async () => {
+      throw new Error("Slack 回覆失敗");
+    };
+    globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("conversations.history")) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            messages: [
+              { ts: "1700000001.000", text: "啟動自動下單", user: "U1" },
+              { ts: "1700000002.000", text: "停止自動下單", user: "U1" },
+            ],
+          }),
+        );
+      }
+      return new Response(JSON.stringify({ ok: true }));
+    }) as unknown as typeof fetch;
+    const newTs = await pollOnce(deps, "1700000000.000"); // 不應拋出
+    expect(newTs).toBe("1700000002.000");
+    expect((await readControlState(deps.cfg.controlPath)).enabled).toBe(false);
     await rm(dir, { recursive: true });
   });
 

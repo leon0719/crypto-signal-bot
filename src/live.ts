@@ -158,6 +158,9 @@ export async function executeLive(
   io: LiveIo,
 ): Promise<{ opened: number; skipped: string[] }> {
   const skipped: string[] = [];
+  // Slack 通報失敗不可拖累帳本(見 C1):notify 一律 best-effort,錯誤只記 log。
+  const notify = (text: string) =>
+    io.notify(text).catch((e) => console.error(`[實盤] Slack 通報失敗:${(e as Error).message}`));
   const control = await readControlState(cfg.controlPath);
   if (!control.enabled) return { opened: 0, skipped: ["自動下單未啟動"] };
 
@@ -174,7 +177,7 @@ export async function executeLive(
     try {
       equity = (await fetchUsdtBalance(io.creds)).equity;
     } catch (e) {
-      await io.notify(`🚨 [實盤] 餘額查詢失敗,本輪全部放棄:${(e as Error).message}`);
+      await notify(`🚨 [實盤] 餘額查詢失敗,本輪全部放棄:${(e as Error).message}`);
       return { opened: 0, skipped: ["餘額查詢失敗"] };
     }
 
@@ -201,7 +204,7 @@ export async function executeLive(
         const plan = planOrder(o, equity, inst, cfg.riskPct);
         if ("skip" in plan) {
           skipped.push(`${tagOf(o)}:${plan.skip}`);
-          await io.notify(`⚠️ [實盤] 放棄 ${tagOf(o)}:${plan.skip}`);
+          await notify(`⚠️ [實盤] 放棄 ${tagOf(o)}:${plan.skip}`);
           continue;
         }
         let ordId: string | null = null;
@@ -232,15 +235,17 @@ export async function executeLive(
         };
         ledger.positions.push(pos);
         opened++;
+        // 帳本立即落盤(見 C1):即使後續 notify 失敗,真單也已記帳,不會漏記。
+        await writeLiveLedger(cfg.ledgerPath, ledger);
         const prefix = cfg.mode === "dry" ? "【模擬】" : "";
-        await io.notify(
+        await notify(
           `${o.dir === "SHORT" ? "🔴" : "🟢"} ${prefix}[實盤] ${tagOf(o)} ${plan.contracts} 張(${plan.leverage}x)\n` +
             `   進場 ~${o.entry} ｜ 停損 ${plan.slPx} ｜ 目標 ${plan.tpPx}\n` +
             `   名目 ${fmtUsdt(plan.notional)} ｜ 保證金 ${fmtUsdt(plan.margin)}${ordId ? ` ｜ 單號 ${ordId}` : ""}`,
         );
       } catch (e) {
         skipped.push(`${tagOf(o)}:下單失敗 ${(e as Error).message}`);
-        await io.notify(`🚨 [實盤] ${tagOf(o)} 下單失敗:${(e as Error).message}`);
+        await notify(`🚨 [實盤] ${tagOf(o)} 下單失敗:${(e as Error).message}`);
       }
     }
     await writeLiveLedger(cfg.ledgerPath, ledger);

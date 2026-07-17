@@ -280,6 +280,22 @@ describe("executeLive", () => {
     expect(notes.some((t) => t.includes("🚨") && t.includes("ETHUSDT"))).toBe(true);
     await rm(dir, { recursive: true });
   });
+
+  it("notify 拋錯後真單仍寫入帳本(C1:best-effort 通報不拖累記帳)", async () => {
+    const { dir, cfg, io } = await makeEnv("real", true);
+    io.notify = async () => {
+      throw new Error("Slack 掛了");
+    };
+    const orders = stubOkxApi();
+    const res = await executeLive([opp()], cfg, io); // 不應 throw / unhandled rejection
+    expect(res.opened).toBe(1);
+    expect(orders.length).toBe(1);
+    const ledger = await readLiveLedger(cfg.ledgerPath);
+    const pos = ledger.positions.find((p) => p.symbol === "BTCUSDT");
+    expect(pos?.status).toBe("OPEN");
+    expect(pos?.ordId).toBe("ord-1");
+    await rm(dir, { recursive: true });
+  });
 });
 
 describe("reconcileLedger", () => {

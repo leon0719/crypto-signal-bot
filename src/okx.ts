@@ -86,7 +86,13 @@ export async function okxRequest<T>(
   };
   let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, { method, headers, body: body || undefined });
+    // 逾時視為網路錯誤,走既有單次重試(見 I6)。
+    res = await fetch(`${BASE}${path}`, {
+      method,
+      headers,
+      body: body || undefined,
+      signal: AbortSignal.timeout(10_000),
+    });
   } catch (err) {
     if (attempt < 1) {
       await sleep(300);

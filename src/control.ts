@@ -8,7 +8,13 @@ import {
   writeControlState,
   writeLiveLedger,
 } from "./live-state.js";
-import { closePosition, fetchPositions, fetchUsdtBalance, type OkxCreds } from "./okx.js";
+import {
+  closePosition,
+  fetchPositions,
+  fetchUsdtBalance,
+  type OkxCreds,
+  type OkxPosition,
+} from "./okx.js";
 
 export type ControlCommand =
   | "start"
@@ -73,19 +79,58 @@ export async function handleCommand(cmd: ControlCommand, deps: ControlDeps): Pro
       // ledger 讀-改-寫span 與 executeLive(detect 子行程)可能並行,以檔案鎖序列化。
       return withFileLock(cfg.ledgerPath, async () => {
         const ledger = await readLiveLedger(cfg.ledgerPath);
-        const opens = ledger.positions.filter((p) => p.status === "OPEN" && p.mode === cfg.mode);
-        if (opens.length === 0) return "🛑 已停止;沒有自動倉位需要平倉";
-        const lines: string[] = [];
-        for (const p of opens) {
+        // real 倉位無論目前 cfg.mode 為何一律處理(見 I4:real→dry 切換後仍要能緊急平掉殘留真倉);
+        // dry 倉位只在目前就是 dry 模式時才模擬平倉。
+        const realOpens = ledger.positions.filter((p) => p.status === "OPEN" && p.mode === "real");
+        const dryOpens =
+          cfg.mode === "dry"
+            ? ledger.positions.filter((p) => p.status === "OPEN" && p.mode === "dry")
+            : [];
+        if (realOpens.length === 0 && dryOpens.length === 0) {
+          return "🛑 已停止;沒有自動倉位需要平倉";
+        }
+
+        // 平倉前對帳(見 I3):先抓一次交易所實際倉位,避免誤平「交易所已出場」或「方向不符的手動倉」。
+        let posMap: Map<string, OkxPosition> | null = null;
+        if (realOpens.length > 0) {
           try {
-            if (cfg.mode === "real") await closePosition(creds, p.instId);
+            const live = await fetchPositions(creds);
+            posMap = new Map(live.map((p) => [p.instId, p]));
+          } catch (e) {
+            return `🚨 對帳失敗,未執行平倉:${(e as Error).message}(請手動處理)`;
+          }
+        }
+
+        const lines: string[] = [];
+        for (const p of realOpens) {
+          const live = posMap?.get(p.instId);
+          if (!live) {
             p.status = "CLOSED";
             p.closedAt = new Date().toISOString();
-            p.closeReason = cfg.mode === "real" ? "緊急平倉" : "【模擬】緊急平倉";
+            p.closeReason = "交易所端已出場(緊急平倉前對帳)";
+            lines.push(`✅ ${p.symbol} 交易所端已出場,帳本已同步`);
+            continue;
+          }
+          const contradicts = p.dir === "SHORT" ? live.pos > 0 : live.pos < 0;
+          if (contradicts) {
+            lines.push(`⚠️ ${p.symbol} 交易所倉位方向與帳本不符,疑似手動倉,請手動處理`);
+            continue;
+          }
+          try {
+            await closePosition(creds, p.instId);
+            p.status = "CLOSED";
+            p.closedAt = new Date().toISOString();
+            p.closeReason = "緊急平倉";
             lines.push(`✅ ${p.symbol} 已平倉`);
           } catch (e) {
             lines.push(`🚨 ${p.symbol} 平倉失敗:${(e as Error).message}(請手動處理)`);
           }
+        }
+        for (const p of dryOpens) {
+          p.status = "CLOSED";
+          p.closedAt = new Date().toISOString();
+          p.closeReason = "【模擬】緊急平倉";
+          lines.push(`✅ ${p.symbol} 已平倉`);
         }
         await writeLiveLedger(cfg.ledgerPath, ledger);
         return [`🛑 緊急平倉(${cfg.mode}):`, ...lines].join("\n");
@@ -95,11 +140,19 @@ export async function handleCommand(cmd: ControlCommand, deps: ControlDeps): Pro
       const control = await readControlState(cfg.controlPath);
       const ledger = await readLiveLedger(cfg.ledgerPath);
       const opens = ledger.positions.filter((p) => p.status === "OPEN" && p.mode === cfg.mode);
-      return (
-        `⚙️ 自動下單:${control.enabled ? "開啟" : "關閉"}｜模式:${cfg.mode}\n` +
-        `自動倉位 ${opens.length}/${cfg.maxPositions}${opens.length ? `(${opens.map((p) => p.symbol).join("、")})` : ""}\n` +
-        `下次掃描:${deps.nextScanText()}`
-      );
+      const lines = [
+        `⚙️ 自動下單:${control.enabled ? "開啟" : "關閉"}｜模式:${cfg.mode}`,
+        `自動倉位 ${opens.length}/${cfg.maxPositions}${opens.length ? `(${opens.map((p) => p.symbol).join("、")})` : ""}`,
+        `下次掃描:${deps.nextScanText()}`,
+      ];
+      // 見 I4:real→dry 切換後帳本可能仍有 real 倉位,狀態查詢時提醒不要漏看。
+      if (cfg.mode === "dry") {
+        const staleReal = ledger.positions.filter((p) => p.status === "OPEN" && p.mode === "real");
+        if (staleReal.length > 0) {
+          lines.push(`⚠️ 注意:帳本仍有 ${staleReal.length} 筆 real 倉位(目前模式 dry)`);
+        }
+      }
+      return lines.join("\n");
     }
     case "balance": {
       const b = await fetchUsdtBalance(creds);
@@ -146,6 +199,7 @@ export async function pollOnce(deps: ControlDeps, lastTs: string): Promise<strin
     `&oldest=${encodeURIComponent(lastTs)}&inclusive=false&limit=20`;
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${deps.slackToken}` },
+    signal: AbortSignal.timeout(10_000),
   });
   const data = (await resp.json()) as { ok: boolean; error?: string; messages?: SlackMessage[] };
   if (!data.ok) throw new Error(`Slack 讀取失敗:${data.error ?? "unknown"}`);
@@ -165,7 +219,12 @@ export async function pollOnce(deps: ControlDeps, lastTs: string): Promise<strin
     } catch (e) {
       reply = `🚨 指令執行失敗:${(e as Error).message}`;
     }
-    await deps.post(reply);
+    try {
+      await deps.post(reply);
+    } catch (e) {
+      // 回覆失敗只記 log,不可讓 pollOnce 拋出(否則 lastTs 不會前進,下一輪重播同一指令)。
+      console.error(`[控制迴圈] 回覆 Slack 失敗:${(e as Error).message}`);
+    }
   }
   return newLast;
 }

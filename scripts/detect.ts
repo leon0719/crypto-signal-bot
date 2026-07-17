@@ -90,20 +90,28 @@ if (rows.length === 0) {
   // 實盤下單:只有 liveTrading 策略;開關/護欄/dry-run 都在 executeLive 內處理。
   // 任何錯誤不影響訊號推播與紙上記帳(executeLive 內部已逐筆告警,這裡是最後防線)。
   if (strategy.liveTrading) {
-    try {
-      const cfg = liveConfigFromEnv(intervalMsOf(strategy.interval));
-      const controlChannel = process.env.SLACK_CONTROL_CHANNEL_ID;
-      const res = await executeLive(news, cfg, {
-        creds: credsFromEnv(),
-        notify: (text) => postMessage(text, controlChannel),
-        lastPrice: (sym) => fetchLastPrice("futures", sym),
-        now: () => Date.now(),
-      });
-      console.log(
-        `${tag} [實盤] 開倉 ${res.opened} 筆${res.skipped.length ? `、跳過:${res.skipped.join(";")}` : ""}`,
-      );
-    } catch (e) {
-      console.error(`${tag} [實盤] 執行失敗:${(e as Error).message}`);
+    if (
+      !process.env.OKX_API_KEY ||
+      !process.env.OKX_API_SECRET ||
+      !process.env.OKX_API_PASSPHRASE
+    ) {
+      // 未設定 OKX,實盤停用(靜默;避免每輪都噴錯誤 log)
+    } else {
+      try {
+        const cfg = liveConfigFromEnv(intervalMsOf(strategy.interval));
+        const controlChannel = process.env.SLACK_CONTROL_CHANNEL_ID;
+        const res = await executeLive(news, cfg, {
+          creds: credsFromEnv(),
+          notify: (text) => postMessage(text, controlChannel),
+          lastPrice: (sym) => fetchLastPrice("futures", sym),
+          now: () => Date.now(),
+        });
+        console.log(
+          `${tag} [實盤] 開倉 ${res.opened} 筆${res.skipped.length ? `、跳過:${res.skipped.join(";")}` : ""}`,
+        );
+      } catch (e) {
+        console.error(`${tag} [實盤] 執行失敗:${(e as Error).message}`);
+      }
     }
   }
 }
