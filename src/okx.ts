@@ -108,3 +108,121 @@ export async function okxRequest<T>(
   }
   return parsed.data;
 }
+
+// ── 帳戶與交易 endpoints ─────────────────────────────
+
+export interface UsdtBalance {
+  equity: number;
+  available: number;
+  unrealizedPnl: number;
+}
+
+// 交易帳戶 USDT 權益/可用/未實現。無 USDT 明細視為異常(fail-closed)。
+export async function fetchUsdtBalance(creds: OkxCreds): Promise<UsdtBalance> {
+  const data = await okxRequest<
+    Array<{ details?: Array<{ ccy: string; eq: string; availBal: string; upl: string }> }>
+  >(creds, "GET", "/api/v5/account/balance?ccy=USDT");
+  const d = data[0]?.details?.find((x) => x.ccy === "USDT");
+  if (!d) throw new Error("OKX 帳戶查無 USDT 明細");
+  return { equity: Number(d.eq), available: Number(d.availBal), unrealizedPnl: Number(d.upl) };
+}
+
+// 合約規格。ctVal(每張合約幣量)轉數字參與運算;lotSz/minSz/tickSz 保留字串,
+// 供步長取整時推導小數位數,避免浮點誤差。
+export interface OkxInstrument {
+  instId: string;
+  ctVal: number;
+  lotSz: string;
+  minSz: string;
+  tickSz: string;
+}
+
+export async function fetchInstrument(creds: OkxCreds, instId: string): Promise<OkxInstrument> {
+  const data = await okxRequest<
+    Array<{ instId: string; ctVal: string; lotSz: string; minSz: string; tickSz: string }>
+  >(creds, "GET", `/api/v5/public/instruments?instType=SWAP&instId=${encodeURIComponent(instId)}`);
+  const it = data[0];
+  if (!it) throw new Error(`OKX 查無合約規格:${instId}`);
+  return {
+    instId: it.instId,
+    ctVal: Number(it.ctVal),
+    lotSz: it.lotSz,
+    minSz: it.minSz,
+    tickSz: it.tickSz,
+  };
+}
+
+// 設定逐倉槓桿(下單前呼叫;同值重複設定無害)。
+export async function setLeverage(creds: OkxCreds, instId: string, lever: number): Promise<void> {
+  await okxRequest(creds, "POST", "/api/v5/account/set-leverage", {
+    instId,
+    lever: String(lever),
+    mgnMode: "isolated",
+  });
+}
+
+export interface LiveOrderParams {
+  instId: string;
+  side: "buy" | "sell";
+  sz: string;
+  tpPx: string;
+  slPx: string;
+}
+
+// 市價單 + attached TP/SL(觸發後市價,ordPx=-1)。回傳 ordId。
+export async function placeMarketWithTpSl(creds: OkxCreds, p: LiveOrderParams): Promise<string> {
+  const data = await okxRequest<Array<{ ordId: string }>>(creds, "POST", "/api/v5/trade/order", {
+    instId: p.instId,
+    tdMode: "isolated",
+    side: p.side,
+    ordType: "market",
+    sz: p.sz,
+    attachAlgoOrds: [{ tpTriggerPx: p.tpPx, tpOrdPx: "-1", slTriggerPx: p.slPx, slOrdPx: "-1" }],
+  });
+  return data[0].ordId;
+}
+
+export interface OkxPosition {
+  instId: string;
+  pos: number; // 正=多、負=空(net 模式)
+  avgPx: number;
+  markPx: number;
+  upl: number;
+  uplRatio: number;
+  lever: string;
+}
+
+// 目前所有 SWAP 倉位(排除 pos=0 的殘留列)。
+export async function fetchPositions(creds: OkxCreds): Promise<OkxPosition[]> {
+  const data = await okxRequest<
+    Array<{
+      instId: string;
+      pos: string;
+      avgPx: string;
+      markPx: string;
+      upl: string;
+      uplRatio: string;
+      lever: string;
+    }>
+  >(creds, "GET", "/api/v5/account/positions?instType=SWAP");
+  return data
+    .filter((p) => Number(p.pos) !== 0)
+    .map((p) => ({
+      instId: p.instId,
+      pos: Number(p.pos),
+      avgPx: Number(p.avgPx),
+      markPx: Number(p.markPx),
+      upl: Number(p.upl),
+      uplRatio: Number(p.uplRatio),
+      lever: p.lever,
+    }));
+}
+
+// 市價全平該合約倉位;autoCxl 同時撤掉掛著的 TP/SL algo 單。
+export async function closePosition(creds: OkxCreds, instId: string): Promise<void> {
+  await okxRequest(creds, "POST", "/api/v5/trade/close-position", {
+    instId,
+    mgnMode: "isolated",
+    autoCxl: true,
+  });
+}
