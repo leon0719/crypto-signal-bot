@@ -116,6 +116,65 @@ describe("handleCommand", () => {
     await rm(dir, { recursive: true });
   });
 
+  it("panic:單筆平倉失敗 → 該筆保持 OPEN、其他筆照平、回報請手動處理", async () => {
+    const { dir, deps } = await makeDeps("real");
+    await writeControlState(deps.cfg.controlPath, { enabled: true });
+    const { readLiveLedger: readLedger } = await import("./live-state.js");
+    await writeLiveLedger(deps.cfg.ledgerPath, {
+      positions: [
+        {
+          key: "BTCUSDT:SHORT:0",
+          symbol: "BTCUSDT",
+          instId: "BTC-USDT-SWAP",
+          dir: "SHORT",
+          contracts: "1",
+          entry: 65000,
+          stop: 67000,
+          target: 62000,
+          leverage: 3,
+          mode: "real",
+          ordId: "x",
+          openedAt: "",
+          status: "OPEN",
+        },
+        {
+          key: "ETHUSDT:LONG:0",
+          symbol: "ETHUSDT",
+          instId: "ETH-USDT-SWAP",
+          dir: "LONG",
+          contracts: "1",
+          entry: 3000,
+          stop: 2900,
+          target: 3200,
+          leverage: 3,
+          mode: "real",
+          ordId: "y",
+          openedAt: "",
+          status: "OPEN",
+        },
+      ],
+    });
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/trade/close-position")) {
+        const body = JSON.parse(String(init?.body)) as { instId: string };
+        if (body.instId === "BTC-USDT-SWAP") {
+          return new Response(JSON.stringify({ code: "51010", msg: "平倉失敗", data: [] }));
+        }
+        return new Response(JSON.stringify({ code: "0", msg: "", data: [{}] }));
+      }
+      return new Response(JSON.stringify({ code: "0", msg: "", data: [] }));
+    }) as unknown as typeof fetch;
+    const text = await handleCommand("panic", deps);
+    expect(text).toContain("請手動處理");
+    const ledger = await readLedger(deps.cfg.ledgerPath);
+    const btc = ledger.positions.find((p) => p.symbol === "BTCUSDT");
+    const eth = ledger.positions.find((p) => p.symbol === "ETHUSDT");
+    expect(btc?.status).toBe("OPEN"); // 失敗的保持 OPEN
+    expect(eth?.status).toBe("CLOSED"); // 成功的照平
+    await rm(dir, { recursive: true });
+  });
+
   it("status 回開關/模式/倉位數/下次掃描", async () => {
     const { dir, deps } = await makeDeps("dry");
     const text = await handleCommand("status", deps);
