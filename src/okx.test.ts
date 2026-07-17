@@ -164,6 +164,19 @@ describe("endpoints", () => {
     expect(algo.slOrdPx).toBe("-1");
   });
 
+  it("placeMarketWithTpSl:外層 code=0 但單筆 sCode 非 0 → 拋 OkxError(fail-closed)", async () => {
+    stubOkx({ "/trade/order": [{ ordId: "", sCode: "51008", sMsg: "餘額不足" }] });
+    await expect(
+      placeMarketWithTpSl(CREDS, {
+        instId: "BTC-USDT-SWAP",
+        side: "buy",
+        sz: "1",
+        tpPx: "1",
+        slPx: "2",
+      }),
+    ).rejects.toThrow(OkxError);
+  });
+
   it("fetchPositions 過濾掉 pos=0 並轉數字", async () => {
     stubOkx({
       "/account/positions": [

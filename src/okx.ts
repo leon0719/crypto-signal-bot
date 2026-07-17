@@ -171,15 +171,24 @@ export interface LiveOrderParams {
 
 // 市價單 + attached TP/SL(觸發後市價,ordPx=-1)。回傳 ordId。
 export async function placeMarketWithTpSl(creds: OkxCreds, p: LiveOrderParams): Promise<string> {
-  const data = await okxRequest<Array<{ ordId: string }>>(creds, "POST", "/api/v5/trade/order", {
-    instId: p.instId,
-    tdMode: "isolated",
-    side: p.side,
-    ordType: "market",
-    sz: p.sz,
-    attachAlgoOrds: [{ tpTriggerPx: p.tpPx, tpOrdPx: "-1", slTriggerPx: p.slPx, slOrdPx: "-1" }],
-  });
-  return data[0].ordId;
+  const data = await okxRequest<Array<{ ordId: string; sCode?: string; sMsg?: string }>>(
+    creds,
+    "POST",
+    "/api/v5/trade/order",
+    {
+      instId: p.instId,
+      tdMode: "isolated",
+      side: p.side,
+      ordType: "market",
+      sz: p.sz,
+      attachAlgoOrds: [{ tpTriggerPx: p.tpPx, tpOrdPx: "-1", slTriggerPx: p.slPx, slOrdPx: "-1" }],
+    },
+  );
+  const first = data[0];
+  if (!first || (first.sCode && first.sCode !== "0")) {
+    throw new OkxError(first?.sCode ?? "unknown", first?.sMsg ?? "下單回應異常(無明細)");
+  }
+  return first.ordId;
 }
 
 export interface OkxPosition {
