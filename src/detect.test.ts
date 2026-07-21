@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { computeLevels, diffNewOpportunities, filterOpportunities, keyOf } from "./detect.js";
+import {
+  computeLevels,
+  diffNewOpportunities,
+  filterOpportunities,
+  guardOpportunities,
+  keyOf,
+  type Opportunity,
+} from "./detect.js";
 import type { ScanRow } from "./scan.js";
 
 function row(over: Partial<ScanRow>): ScanRow {
@@ -71,5 +78,88 @@ describe("diffNewOpportunities", () => {
 
   test("keyOf 格式為 SYMBOL:DIR", () => {
     expect(keyOf(link)).toBe("LINKUSDT:SHORT");
+  });
+});
+
+function guardOpp(symbol: string, dir: "LONG" | "SHORT", score: number): Opportunity {
+  return {
+    symbol,
+    dir,
+    entry: 100,
+    stop: dir === "SHORT" ? 104 : 96,
+    target: dir === "SHORT" ? 94 : 106,
+    score,
+    regime: "趨勢",
+    adx: 30,
+    htf1d: null,
+    oi: null,
+  };
+}
+
+describe("guardOpportunities:相關性護欄", () => {
+  const noOpen = { LONG: 0, SHORT: 0 };
+
+  test("同輪同方向 ≥3 → 只留 |score| 最強一支,其餘進 dropped", () => {
+    const news = [
+      guardOpp("ETHUSDT", "SHORT", -70),
+      guardOpp("XRPUSDT", "SHORT", -95),
+      guardOpp("LINKUSDT", "SHORT", -88),
+      guardOpp("NEARUSDT", "SHORT", -60),
+    ];
+    const { kept, dropped, notes } = guardOpportunities(news, noOpen);
+    expect(kept.map((o) => o.symbol)).toEqual(["XRPUSDT"]);
+    expect(dropped.map((o) => o.symbol).sort()).toEqual(["ETHUSDT", "LINKUSDT", "NEARUSDT"]);
+    expect(notes.length).toBeGreaterThan(0);
+  });
+
+  test("同輪同方向 2 支 → 不觸發整批降級,全數保留", () => {
+    const news = [guardOpp("ETHUSDT", "SHORT", -70), guardOpp("XRPUSDT", "SHORT", -95)];
+    const { kept, dropped } = guardOpportunities(news, noOpen);
+    expect(kept.length).toBe(2);
+    expect(dropped.length).toBe(0);
+  });
+
+  test("方向獨立判定:3 空 1 多 → 空縮成 1 支,多不受影響", () => {
+    const news = [
+      guardOpp("ETHUSDT", "SHORT", -70),
+      guardOpp("XRPUSDT", "SHORT", -95),
+      guardOpp("LINKUSDT", "SHORT", -88),
+      guardOpp("ZECUSDT", "LONG", 80),
+    ];
+    const { kept } = guardOpportunities(news, noOpen);
+    expect(kept.map((o) => o.symbol).sort()).toEqual(["XRPUSDT", "ZECUSDT"]);
+  });
+
+  test("同方向持倉上限 3:已持 2 空 + 新 2 空 → 只留最強 1 支", () => {
+    const news = [guardOpp("ETHUSDT", "SHORT", -70), guardOpp("XRPUSDT", "SHORT", -95)];
+    const { kept, dropped, notes } = guardOpportunities(news, { LONG: 0, SHORT: 2 });
+    expect(kept.map((o) => o.symbol)).toEqual(["XRPUSDT"]);
+    expect(dropped.map((o) => o.symbol)).toEqual(["ETHUSDT"]);
+    expect(notes.length).toBeGreaterThan(0);
+  });
+
+  test("已持 3 空 → 新空單全擋,多單照常", () => {
+    const news = [guardOpp("ETHUSDT", "SHORT", -70), guardOpp("ZECUSDT", "LONG", 80)];
+    const { kept, dropped } = guardOpportunities(news, { LONG: 0, SHORT: 3 });
+    expect(kept.map((o) => o.symbol)).toEqual(["ZECUSDT"]);
+    expect(dropped.map((o) => o.symbol)).toEqual(["ETHUSDT"]);
+  });
+
+  test("整批降級與持倉上限疊加:4 空且已持 2 → 仍只留最強 1 支", () => {
+    const news = [
+      guardOpp("ETHUSDT", "SHORT", -70),
+      guardOpp("XRPUSDT", "SHORT", -95),
+      guardOpp("LINKUSDT", "SHORT", -88),
+      guardOpp("NEARUSDT", "SHORT", -60),
+    ];
+    const { kept } = guardOpportunities(news, { LONG: 0, SHORT: 2 });
+    expect(kept.map((o) => o.symbol)).toEqual(["XRPUSDT"]);
+  });
+
+  test("空輸入 → 空輸出不炸", () => {
+    const { kept, dropped, notes } = guardOpportunities([], noOpen);
+    expect(kept).toEqual([]);
+    expect(dropped).toEqual([]);
+    expect(notes).toEqual([]);
   });
 });

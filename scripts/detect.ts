@@ -1,7 +1,12 @@
 // 定時偵測進入點:bun scripts/detect.ts [策略名](預設 4h)。
 // 掃描 → 篩有效機會 → 與上輪去重 →(依策略設定)推新機會到 Slack → 紙上交易記帳。
 import { fetchKlines, fetchLastPrice } from "../src/bybit.js";
-import { diffNewOpportunities, filterOpportunities, keyOf } from "../src/detect.js";
+import {
+  diffNewOpportunities,
+  filterOpportunities,
+  guardOpportunities,
+  keyOf,
+} from "../src/detect.js";
 import { executeLive, liveConfigFromEnv } from "../src/live.js";
 import { credsFromEnv } from "../src/okx.js";
 import { defaultPaperConfig } from "../src/paper.js";
@@ -35,17 +40,26 @@ if (rows.length === 0) {
 } else {
   const opps = filterOpportunities(rows);
   const prev = await readActive(STATE_PATH);
-  const { news, active } = diffNewOpportunities(opps, prev);
+  const { news: rawNews, active } = diffNewOpportunities(opps, prev);
+
+  // 相關性護欄:同輪同方向 ≥3 只留最強、同方向持倉上限 3(以紙上帳本的未結部位計,
+  // 本輪結算前的保守計數)。被擋的 key 仍寫入 active——整批降級,不讓其餘幾支下輪補進。
+  const ledger = await readLedger(PAPER_PATH, PAPER_START);
+  const openByDir = { LONG: 0, SHORT: 0 };
+  for (const p of ledger.positions) if (p.status === "OPEN") openByDir[p.dir]++;
+  const { kept: news, notes: guardNotes } = guardOpportunities(rawNews, openByDir);
+  if (guardNotes.length > 0) console.log(`${tag} [護欄] ${guardNotes.join(";")}`);
 
   console.log(
-    `${tag} [${new Date().toISOString()}] 掃描完成:有效機會 ${opps.length}、新機會 ${news.length}`,
+    `${tag} [${new Date().toISOString()}] 掃描完成:有效機會 ${opps.length}、新機會 ${rawNews.length}、護欄後 ${news.length}`,
   );
 
   // 預設把本輪全部有效機會寫入狀態;若推播失敗,把新機會的 key 撤回,下輪可補推。
   let committed = active;
   if (strategy.pushSignals && news.length > 0) {
     try {
-      await postMessage(buildSlackText(news));
+      const guardLine = guardNotes.length > 0 ? `\n⚠️ 護欄:${guardNotes.join(";")}` : "";
+      await postMessage(buildSlackText(news) + guardLine);
       console.log(
         `${tag} 已推播 ${news.length} 則到 Slack:${news.map((o) => `${o.symbol}:${o.dir}`).join(", ")}`,
       );
@@ -65,8 +79,8 @@ if (rows.length === 0) {
         ...defaultPaperConfig(),
         startEquity: PAPER_START,
         intervalMs: intervalMsOf(strategy.interval),
+        exit: "trailing" as const, // 2026-07-21 起新一輪:回測驗證的 2×ATR 移動停損
       };
-      const ledger = await readLedger(PAPER_PATH, PAPER_START);
       const result = await runPaper(
         news,
         ledger,

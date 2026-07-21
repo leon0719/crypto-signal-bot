@@ -57,6 +57,50 @@ export function filterOpportunities(rows: ScanRow[]): Opportunity[] {
   return opps;
 }
 
+export interface GuardResult {
+  kept: Opportunity[];
+  dropped: Opportunity[];
+  notes: string[]; // 人可讀的攔截說明(推播/console 用)
+}
+
+// 相關性護欄:同輪同方向 ≥batchCollapse 支視為同一注(高相關)只留 |score| 最強一支;
+// 加上「同方向同時持倉上限 maxSameDir」——擋 2026-07 前向測試裡整批空單一起停損的出血模式。
+export function guardOpportunities(
+  news: Opportunity[],
+  openByDir: { LONG: number; SHORT: number },
+  opts: { batchCollapse?: number; maxSameDir?: number } = {},
+): GuardResult {
+  const batchCollapse = opts.batchCollapse ?? 3;
+  const maxSameDir = opts.maxSameDir ?? 3;
+  const kept: Opportunity[] = [];
+  const dropped: Opportunity[] = [];
+  const notes: string[] = [];
+  for (const dir of ["LONG", "SHORT"] as const) {
+    let group = news
+      .filter((o) => o.dir === dir)
+      .sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
+    if (group.length === 0) continue;
+    if (group.length >= batchCollapse) {
+      notes.push(`同輪 ${group.length} 支 ${dir} 高相關,只留最強 ${group[0].symbol}`);
+      dropped.push(...group.slice(1));
+      group = group.slice(0, 1);
+    }
+    const slots = Math.max(0, maxSameDir - openByDir[dir]);
+    if (group.length > slots) {
+      notes.push(
+        `${dir} 已持 ${openByDir[dir]} 筆達上限 ${maxSameDir},擋下 ${group
+          .slice(slots)
+          .map((o) => o.symbol)
+          .join("、")}`,
+      );
+      dropped.push(...group.slice(slots));
+      group = group.slice(0, slots);
+    }
+    kept.push(...group);
+  }
+  return { kept, dropped, notes };
+}
+
 export function keyOf(o: Opportunity): string {
   return `${o.symbol}:${o.dir}`;
 }

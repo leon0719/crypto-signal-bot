@@ -160,6 +160,70 @@ describe("settlePosition:停損/達標判定", () => {
   });
 });
 
+describe("settlePosition:trailing 出場(2×ATR 移動停損,無固定停利)", () => {
+  const tcfg = { ...cfg, exit: "trailing" as const };
+  const barsAt = (bars: Array<Partial<Bar>>): Bar[] =>
+    bars.map((b, i) => ({ openTime: T0 + (i + 1) * HOUR4, high: 100, low: 100, close: 100, ...b }));
+
+  test("多單走高後回檔:停損上移到波段高點−2×ATR,觸及以正 R 出場,狀態 STOP", () => {
+    // entry 100、初始停損 96(2×ATR=4)。bar1 高點 108 → 停損上移到 104;
+    // bar2 低點 103.9 觸及 → 以 104 出場,R = (104-100)/4 = +1。
+    const pos = sizePosition(opp({ symbol: "BTCUSDT", dir: "LONG" }), 2000, T0, tcfg);
+    const done = settlePosition(pos, barsAt([{ high: 108, low: 101 }, { low: 103.9 }]), tcfg);
+    expect(done.status).toBe("STOP");
+    expect(done.exitPrice).toBeCloseTo(104, 6);
+    expect(done.rMultiple).toBeCloseTo(1, 6);
+  });
+
+  test("突破固定 target 不出場(trailing 無固定停利)", () => {
+    const pos = sizePosition(opp({ symbol: "BTCUSDT", dir: "LONG" }), 2000, T0, tcfg);
+    const done = settlePosition(pos, barsAt([{ high: 107, low: 105, close: 106 }]), tcfg);
+    expect(done.status).toBe("OPEN");
+  });
+
+  test("同一根先檢查停損(用前棒 trail)、再用本棒高低點更新,不前視", () => {
+    // bar1 高點 108 同時低點 95:用「初始」停損 96 判定 → 停損出場,R=-1,
+    // 不能用本棒高點 108 先把停損抬到 104 再說觸及(那是前視)。
+    const pos = sizePosition(opp({ symbol: "BTCUSDT", dir: "LONG" }), 2000, T0, tcfg);
+    const done = settlePosition(pos, barsAt([{ high: 108, low: 95 }]), tcfg);
+    expect(done.status).toBe("STOP");
+    expect(done.exitPrice).toBeCloseTo(96, 6);
+    expect(done.rMultiple).toBeCloseTo(-1, 6);
+  });
+
+  test("未觸發時回傳 OPEN 且落盤 trail/settledBarOpen,下輪只處理新棒", () => {
+    const pos = sizePosition(opp({ symbol: "BTCUSDT", dir: "LONG" }), 2000, T0, tcfg);
+    const bars = barsAt([{ high: 108, low: 101, close: 107 }]);
+    const mid = settlePosition(pos, bars, tcfg);
+    expect(mid.status).toBe("OPEN");
+    expect(mid.trail).toBeCloseTo(104, 6);
+    expect(mid.settledBarOpen).toBe(bars[0].openTime);
+    // 下輪重複餵同一根 + 新一根:同一根不得重複處理,新棒觸 104 出場
+    const done = settlePosition(mid, [...bars, ...barsAt([{}, { low: 103 }]).slice(1)], tcfg);
+    expect(done.status).toBe("STOP");
+    expect(done.exitPrice).toBeCloseTo(104, 6);
+  });
+
+  test("空單:停損隨波段低點下移(低點 92 → 停損 96),反彈觸及出場", () => {
+    const pos = sizePosition(
+      opp({ symbol: "BTCUSDT", dir: "SHORT", stop: 104, target: 94 }),
+      2000,
+      T0,
+      tcfg,
+    );
+    const done = settlePosition(pos, barsAt([{ low: 92, high: 99 }, { high: 96.1 }]), tcfg);
+    expect(done.status).toBe("STOP");
+    expect(done.exitPrice).toBeCloseTo(96, 6);
+    expect(done.rMultiple).toBeCloseTo(1, 6); // (100-96)/4
+  });
+
+  test("fixed 模式行為不變:達標仍以 TARGET 出場", () => {
+    const pos = sizePosition(opp({ symbol: "BTCUSDT", dir: "LONG" }), 2000, T0, cfg);
+    const done = settlePosition(pos, barsAt([{ high: 107 }]), cfg);
+    expect(done.status).toBe("TARGET");
+  });
+});
+
 describe("openPositions:去重", () => {
   test("已在場的 key 不重開", () => {
     const opps = [

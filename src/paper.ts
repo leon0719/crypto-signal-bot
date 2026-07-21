@@ -9,6 +9,9 @@ export interface PaperConfig {
   leverage: number; // 舊帳本部位的 fallback 槓桿(新部位改依 ATR 動態計算,見 risk.ts)
   feeRoundTrip: number; // 來回手續費佔名目比例(回測用 0.2%)
   intervalMs: number; // 訊號週期(4h)
+  // 出場模式:"fixed" 固定 2×ATR 停損/3×ATR 停利;"trailing" 停損隨波段高/低點以
+  // 2×ATR 距離移動、無固定停利(回測驗證 avgR 0.08→0.15,語意同 backtest.ts)。
+  exit: "fixed" | "trailing";
 }
 
 export const defaultPaperConfig = (): PaperConfig => ({
@@ -17,6 +20,7 @@ export const defaultPaperConfig = (): PaperConfig => ({
   leverage: 3,
   feeRoundTrip: 0.002,
   intervalMs: 4 * 3_600_000,
+  exit: "fixed",
 });
 
 export type PaperStatus = "OPEN" | "STOP" | "TARGET";
@@ -37,6 +41,10 @@ export interface PaperPosition {
   marginUsed: number; // 佔用保證金 = notional/leverage
   liq: number; // 約略強平價(參考用)
   status: PaperStatus;
+  // trailing 出場的增量結算狀態(每輪落盤,避免持倉超過 K 線回看窗時 trail 失真)
+  trail?: number; // 目前移動停損價
+  extreme?: number; // 進場後波段極值(多=最高、空=最低)
+  settledBarOpen?: number; // 已處理到哪根棒的 openTime
   exitPrice?: number;
   exitTime?: number;
   rMultiple?: number; // 已實現 R(停損≈-1、達標≈+1.5)
@@ -107,6 +115,7 @@ export interface Bar {
 // 同一根同時觸及停損與達標時,保守假設「先停損」。回傳結算後的部位(或原樣若仍持有)。
 export function settlePosition(pos: PaperPosition, bars: Bar[], cfg: PaperConfig): PaperPosition {
   if (pos.status !== "OPEN") return pos;
+  if (cfg.exit === "trailing") return settleTrailing(pos, bars, cfg);
   for (const b of bars) {
     if (b.openTime <= pos.entryBarOpen) continue; // 只看進場棒「之後」已收的棒
     const hitStop = pos.dir === "LONG" ? b.low <= pos.stop : b.high >= pos.stop;
@@ -115,6 +124,29 @@ export function settlePosition(pos: PaperPosition, bars: Bar[], cfg: PaperConfig
     if (hitTarget) return close(pos, pos.target, "TARGET", b.openTime, cfg);
   }
   return pos;
+}
+
+// trailing 結算:同一根先用「前棒為止」的 trail 判定觸及(不前視),再用本棒高/低更新
+// trail 供下一根使用。未觸發時把 trail/extreme/settledBarOpen 落盤,下輪只處理新棒——
+// 部位存活超過 K 線回看窗也不會失真。移動距離 = 進場停損距(即 2×ATR)。
+function settleTrailing(pos: PaperPosition, bars: Bar[], cfg: PaperConfig): PaperPosition {
+  const isLong = pos.dir === "LONG";
+  const trailDist = Math.abs(pos.entry - pos.stop);
+  let trail = pos.trail ?? pos.stop;
+  let extreme = pos.extreme ?? (isLong ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY);
+  let last = pos.settledBarOpen ?? pos.entryBarOpen;
+  let advanced = false;
+  for (const b of bars) {
+    if (b.openTime <= last) continue; // 只看進場棒之後、且尚未處理過的棒
+    const hitStop = isLong ? b.low <= trail : b.high >= trail;
+    if (hitStop) return close(pos, trail, "STOP", b.openTime, cfg);
+    extreme = isLong ? Math.max(extreme, b.high) : Math.min(extreme, b.low);
+    const next = isLong ? extreme - trailDist : extreme + trailDist;
+    trail = isLong ? Math.max(trail, next) : Math.min(trail, next);
+    last = b.openTime;
+    advanced = true;
+  }
+  return advanced ? { ...pos, trail, extreme, settledBarOpen: last } : pos;
 }
 
 function close(
