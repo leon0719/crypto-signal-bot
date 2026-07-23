@@ -79,7 +79,9 @@ if (rows.length === 0) {
         ...defaultPaperConfig(),
         startEquity: PAPER_START,
         intervalMs: intervalMsOf(strategy.interval),
-        exit: "trailing" as const, // 2026-07-21 起新一輪:回測驗證的 2×ATR 移動停損
+        // 2026-07-23:移除 exit: "trailing" 覆寫,回到 defaultPaperConfig 的 "fixed"。
+        // 先前改 trailing 的依據(docs §3)是在「停損 2×ATR」的錯誤假設下量的;
+        // 修正停損倍數後重測,fixed(stop1/take3)淨avgR +0.146 明顯優於 trailing 的 −0.014。
       };
       const result = await runPaper(
         news,
