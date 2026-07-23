@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { backtest, summarize, type Trade } from "./backtest.js";
+import { backtest, netAvgR, netR, summarize, type Trade } from "./backtest.js";
 import { defaultConfig } from "./signal.js";
 import { Direction, type Kline } from "./types.js";
 
@@ -11,6 +11,7 @@ function trade(rMultiple: number, entryIndex = 0, exitIndex = 1): Trade {
     exitIndex,
     entryPrice: 100,
     exitPrice: 100 + rMultiple,
+    riskPrice: 1,
     rMultiple,
     outcome: rMultiple >= 0 ? "win" : "loss",
     reason: rMultiple >= 0 ? "take" : "stop",
@@ -140,5 +141,90 @@ describe("backtest 整合", () => {
     });
     expect(r.total).toBeGreaterThan(0);
     expect(seen.length).toBeGreaterThanOrEqual(r.total);
+  });
+});
+
+describe("成本模型", () => {
+  test("netR 依 進場價/風險距離 扣除 round-trip 成本", () => {
+    // entryPrice=100、riskPrice=2 → costR = 0.002 × 100 / 2 = 0.1
+    const t: Trade = {
+      direction: "LONG",
+      entryIndex: 0,
+      exitIndex: 1,
+      entryPrice: 100,
+      exitPrice: 106,
+      riskPrice: 2,
+      rMultiple: 3,
+      outcome: "win",
+      reason: "take",
+    };
+    expect(netR(t)).toBeCloseTo(2.9, 10);
+  });
+
+  test("停損距離越小,成本佔 R 比例越高", () => {
+    const base: Trade = {
+      direction: "LONG",
+      entryIndex: 0,
+      exitIndex: 1,
+      entryPrice: 100,
+      exitPrice: 101,
+      riskPrice: 1,
+      rMultiple: 1,
+      outcome: "win",
+      reason: "take",
+    };
+    expect(netR(base)).toBeCloseTo(0.8, 10); // costR = 0.2
+    expect(netR({ ...base, riskPrice: 4 })).toBeCloseTo(0.95, 10); // costR = 0.05
+  });
+
+  test("riskPrice 為 0 時不扣成本(避免除以零)", () => {
+    const t: Trade = {
+      direction: "LONG",
+      entryIndex: 0,
+      exitIndex: 1,
+      entryPrice: 100,
+      exitPrice: 100,
+      riskPrice: 0,
+      rMultiple: 0,
+      outcome: "win",
+      reason: "eod",
+    };
+    expect(netR(t)).toBe(0);
+  });
+
+  test("netAvgR 為每筆淨 R 的平均;空陣列回 0", () => {
+    const t = (rMultiple: number): Trade => ({
+      direction: "LONG",
+      entryIndex: 0,
+      exitIndex: 1,
+      entryPrice: 100,
+      exitPrice: 100,
+      riskPrice: 2,
+      rMultiple,
+      outcome: rMultiple >= 0 ? "win" : "loss",
+      reason: "take",
+    });
+    expect(netAvgR([t(3), t(-1)])).toBeCloseTo(0.9, 10); // (2.9 + −1.1) / 2
+    expect(netAvgR([])).toBe(0);
+  });
+});
+
+describe("backtest 回傳的 riskPrice", () => {
+  test("等於 stopATR × 進場當根 ATR", () => {
+    // 造一段單調上漲的 K 線,確保有進場;只驗 riskPrice 與 entryPrice/stop 距離一致。
+    const kl = Array.from({ length: 400 }, (_, i) => ({
+      openTime: i * 3_600_000,
+      open: 100 + i * 0.5,
+      high: 101 + i * 0.5,
+      low: 99 + i * 0.5,
+      close: 100.5 + i * 0.5,
+      volume: 1000,
+    }));
+    const r = backtest(kl, defaultConfig());
+    expect(r.total).toBeGreaterThan(0);
+    for (const t of r.trades) {
+      expect(t.riskPrice).toBeGreaterThan(0);
+      expect(Number.isFinite(t.riskPrice)).toBe(true);
+    }
   });
 });

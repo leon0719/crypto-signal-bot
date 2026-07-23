@@ -15,6 +15,7 @@ export interface Trade {
   exitIndex: number; // 出場那根
   entryPrice: number;
   exitPrice: number;
+  riskPrice: number; // 停損距離(價格單位),用來把手續費/滑點換算成 R
   rMultiple: number; // 以風險(stop 距離)為單位的盈虧;+2 代表賺 2 倍風險
   outcome: "win" | "loss";
   reason: "take" | "stop" | "eod"; // 觸發停利 / 停損 / 資料用盡強制平倉
@@ -161,6 +162,7 @@ function simulateExit(
       exitIndex,
       entryPrice,
       exitPrice,
+      riskPrice: risk,
       rMultiple,
       outcome: rMultiple >= 0 ? "win" : "loss",
       reason,
@@ -210,4 +212,19 @@ export function summarize(trades: Trade[]): BacktestResult {
     avgLossR: losses > 0 ? grossLoss / losses : 0,
     avgBarsHeld: total > 0 ? barsHeld / total : 0,
   };
+}
+
+// round-trip 成本(手續費 + 滑點)換算成 R:costR = fee × 進場價 / 停損距離。
+// 停損距離越小(短週期),同樣的百分比成本吃掉的 R 越多——短週期策略常敗在這裡。
+export function netR(t: Trade, feeRoundTrip = 0.002): number {
+  if (!(t.riskPrice > 0)) return t.rMultiple;
+  return t.rMultiple - (feeRoundTrip * t.entryPrice) / t.riskPrice;
+}
+
+// 每筆淨 R 的平均。空陣列回 0。
+export function netAvgR(trades: Trade[], feeRoundTrip = 0.002): number {
+  if (trades.length === 0) return 0;
+  let sum = 0;
+  for (const t of trades) sum += netR(t, feeRoundTrip);
+  return sum / trades.length;
 }
