@@ -30,8 +30,12 @@ export function defaultConfig(): Config {
     obvSlow: 30,
     bbMult: 2.0,
     entryThreshold: 25,
-    stopATR: 1.0,
-    takeATR: 3.0, // 停損 1.0×ATR、停利 3.0×ATR → R:R = 1:3。回測(500 天、8 標的、train/test 分割)顯示較緊的停損 + 1:3 在樣本外期望值最穩。
+    // 2026-07-23:1.0 → 2.0。走動前推(2021-2026、23 季、含成本)顯示 1×ATR 停損的
+    // 兩平手續費只有 0.087%,比 taker 來回(0.10%)還低——用市價單注定虧。
+    // 2×ATR 停損配 2×ATR 移動停損的兩平點是 0.268%,是實際成本的三四倍。
+    // 停損越寬,固定百分比成本佔 R 的比例越小,這是機制不是巧合。
+    stopATR: 2.0,
+    takeATR: 3.0, // 卡片與實盤 TP 的參考目標。經驗證的出場是移動停損(見 docs 走動前推節),非此固定停利。
     regimeSwitch: true,
     adxTrendMin: 25,
     adxRangeMax: 20,

@@ -30,32 +30,32 @@ function row(over: Partial<ScanRow>): ScanRow {
 
 describe("computeLevels", () => {
   // 停損/停利倍數的唯一真實來源是 signal.ts 的 defaultConfig(),回測用的也是它。
-  // 2026-07-23 修正:先前這裡寫死 2×ATR 停損,與回測驗證的 1×ATR 不同步,
-  // 導致實盤跑的 R:R 是 1.5 而非 1:3(樣本外淨 avgR 0.146 → 0.054)。
+  // 2026-07-23:先前這裡寫死倍數,與 defaultConfig 不同步。收斂為單一來源後,
+  // 走動前推(23 季)把 stopATR 定為 2.0——1×ATR 的兩平手續費低於 taker 成本。
   const cfg = defaultConfig();
 
   test("倍數取自 defaultConfig,不得寫死", () => {
-    expect(cfg.stopATR).toBe(1.0);
+    expect(cfg.stopATR).toBe(2.0);
     expect(cfg.takeATR).toBe(3.0);
   });
 
   test("做空:停損=price+stopATR×ATR、目標=price−takeATR×ATR", () => {
-    // 7.16 + 1×0.13 = 7.29;7.16 − 3×0.13 = 6.77
-    expect(computeLevels("SHORT", 7.16, 0.13)).toEqual({ stop: 7.29, target: 6.77 });
+    // 7.16 + 2×0.13 = 7.42;7.16 − 3×0.13 = 6.77
+    expect(computeLevels("SHORT", 7.16, 0.13)).toEqual({ stop: 7.42, target: 6.77 });
   });
 
   test("做多:停損=price−stopATR×ATR、目標=price+takeATR×ATR", () => {
-    expect(computeLevels("LONG", 100, 2)).toEqual({ stop: 98, target: 106 });
+    expect(computeLevels("LONG", 100, 2)).toEqual({ stop: 96, target: 106 });
   });
 
   test("次美元幣用 5 位小數(做空)", () => {
-    // DOGE 例:price 0.07117、atr 0.00149 → 停損 0.07266、目標 0.0667
-    expect(computeLevels("SHORT", 0.07117, 0.00149)).toEqual({ stop: 0.07266, target: 0.0667 });
+    // DOGE 例:price 0.07117、atr 0.00149 → 停損 0.07415、目標 0.0667
+    expect(computeLevels("SHORT", 0.07117, 0.00149)).toEqual({ stop: 0.07415, target: 0.0667 });
   });
 
   test("倍數隨傳入的設定連動(回測掃參數時實盤跟著變)", () => {
-    const wide = { ...cfg, stopATR: 2.0, takeATR: 4.0 };
-    expect(computeLevels("LONG", 100, 2, wide)).toEqual({ stop: 96, target: 108 });
+    const wide = { ...cfg, stopATR: 1.0, takeATR: 4.0 };
+    expect(computeLevels("LONG", 100, 2, wide)).toEqual({ stop: 98, target: 108 });
   });
 });
 
@@ -70,7 +70,7 @@ describe("filterOpportunities", () => {
     expect(opps.map((o) => o.symbol)).toEqual(["LINKUSDT"]);
     expect(opps[0].dir).toBe("SHORT");
     expect(opps[0].entry).toBe(7.16);
-    expect(opps[0].stop).toBe(7.29);
+    expect(opps[0].stop).toBe(7.42);
   });
 
   test("帶出 atr,下游算槓桿不必由停損距反推", () => {

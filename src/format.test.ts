@@ -60,9 +60,9 @@ describe("buildFlexMessage 大週期確認", () => {
     expect(msg.altText).toContain("做多");
     const blob = JSON.stringify(msg.contents);
     expect(blob).toContain("方向一致 ✓");
-    // 出場指引:固定 1:3(2026-07-23 起,移動停損建議已依重測結果撤下)。
-    expect(blob).toContain("出場紀律");
-    expect(blob).toContain("固定 3:1 出場優於移動停損");
+    // 出場指引:移動停損(走動前推 23 季驗證,距離 = cfg.stopATR×ATR)。
+    expect(blob).toContain("移動停損");
+    expect(blob).toContain("波段高點 − 2×ATR");
   });
 
   test("有即時價 → 卡片顯示即時價 + 標註訊號依收盤價", () => {

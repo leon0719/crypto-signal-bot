@@ -9,7 +9,12 @@
 // 這是走動前推「評估」不是「優化」——參數一律用 defaultConfig(),不逐窗重新擬合。
 // 要回答的是「目前這組設定穩不穩」,不是「每段期間最好的參數是什麼」。
 //
-// 用法:bun run walkforward [interval]  (預設 4h)
+// 出場與成本必須跟 production 一致,否則這支的數字沒有意義:
+//   出場 = trailing(scripts/detect.ts 實際採用),移動距離 = cfg.stopATR × ATR
+//   成本 = 0.07%(OKX VIP0 永續 2bps maker / 5bps taker,maker 進 taker 出)
+//   ——先前預設的 0.20% 是 taker 來回再加 10bps 滑點,對小額打主流幣過於保守。
+//
+// 用法:bun run walkforward [interval] [fee]  (預設 4h、0.0007)
 // 首次執行會抓數年 K 線並寫入 ./.cache/klines,需數分鐘。
 
 import { backtest, netR, type Trade } from "../src/backtest.js";
@@ -26,6 +31,7 @@ import { defaultConfig } from "../src/signal.js";
 import type { Kline } from "../src/types.js";
 
 const BARS_4H = 12000; // ~5.5 年
+const EXIT = { exit: "trailing" as const, trailATR: 2 }; // 與 scripts/detect.ts 一致
 const EQUITY = 2000;
 const RISK = 0.01; // 每筆風險 1%,把 R 換成 USDT 用
 
@@ -53,7 +59,8 @@ function pctChange(k: Kline[], w: Window): number | null {
 }
 
 async function main(): Promise<void> {
-  const [interval = "4h"] = process.argv.slice(2);
+  const [interval = "4h", feeArg] = process.argv.slice(2);
+  const fee = feeArg ? Number(feeArg) : 0.0007;
   const cfg = defaultConfig();
   const htfInterval = HTF_MAP[interval];
   const bars = interval === "4h" ? BARS_4H : 12000;
@@ -61,7 +68,7 @@ async function main(): Promise<void> {
 
   console.log(
     `走動前推:${interval}、參數固定為 defaultConfig(stop${cfg.stopATR}/take${cfg.takeATR})、` +
-      `MTF ${htfInterval ?? "無"}、含 0.2% 成本`,
+      `MTF ${htfInterval ?? "無"}、trailing 出場、成本 ${(fee * 100).toFixed(3)}%`,
   );
   console.log(`載入歷史(每標的最多 ${bars} 根,首次會很久)…`);
 
@@ -109,6 +116,7 @@ async function main(): Promise<void> {
       symbols++;
       const mtf = filters.get(l.symbol);
       const r = backtest(l.k, cfg, {
+        ...EXIT,
         entryFilter: (dir, i) => {
           const closeAt = l.k[i].openTime + barMs(interval); // 訊號於此棒收盤確定
           if (closeAt < w.from || closeAt >= w.to) return false;
@@ -121,8 +129,8 @@ async function main(): Promise<void> {
     stats.push({
       label: w.label,
       n: all.length,
-      wins: all.filter((t) => netR(t) > 0).length,
-      netR: all.reduce((s, t) => s + netR(t), 0),
+      wins: all.filter((t) => netR(t, fee) > 0).length,
+      netR: all.reduce((s, t) => s + netR(t, fee), 0),
       longs: all.filter((t) => t.direction === "LONG").length,
       shorts: all.filter((t) => t.direction === "SHORT").length,
       symbols,

@@ -303,13 +303,16 @@ export function buildBubble(
     body.push(kvRow("賺賠比", `${p.rr.toFixed(1)} : 1`));
 
     // 出場紀律(無狀態,純文字提示)。
-    // 2026-07-23:此處原本建議「2×ATR 移動停損」,依據是 docs §3——但那組數字是在
-    // 「停損 2×ATR」的錯誤假設下量的。修正停損倍數後重測(4h、8 主流幣、樣本外、
-    // MTF on、含成本):固定 1:3 淨avgR +0.146,移動停損 −0.014。改為建議固定出場。
-    const cfg = ind.cfg;
+    // 2026-07-23:當日曾一度改為建議固定停利,依據是 3000 根的後 30% 窗口——而該窗口
+    // 被 2026Q2 單季主導。走動前推(2021-2026、23 季、成本 0.07%)的結論相反:
+    // stop2+trailing2 淨avgR +0.043、賺錢季 14/23;固定 1:3 只有 +0.008、10/23。
+    // 上方顯示的「停利」是參考目標,經驗證的出場是移動停損。
+    const trailMul = ind.cfg.stopATR;
+    const trailPct = ((trailMul * res.atr) / p.entry) * 100;
+    const trailAnchor = isLong ? `波段高點 − ${trailMul}×ATR` : `波段低點 + ${trailMul}×ATR`;
     body.push({
       type: "text",
-      text: `🔒 出場紀律:停損與停利同時掛好就別再動它。回測顯示固定 ${cfg.takeATR}:${cfg.stopATR} 出場優於移動停損——提前手動獲利了結會把賺賠比壓垮,而這個策略的勝率本來就靠賠率撐。`,
+      text: `🔒 移動停損(建議):停損改掛「${trailAnchor}(約 ${trailPct.toFixed(1)}%)」,隨新${isLong ? "高" : "低"}${isLong ? "上移" : "下移"};上方停利只是參考目標,回測顯示提前全出會把贏單切斷。`,
       size: "xs",
       color: COLOR.sub,
       wrap: true,

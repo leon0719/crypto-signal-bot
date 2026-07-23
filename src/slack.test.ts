@@ -9,7 +9,7 @@ const link: Opportunity = {
   symbol: "LINKUSDT",
   dir: "SHORT",
   entry: 7.16,
-  stop: 7.29,
+  stop: 7.42,
   target: 6.77,
   atr: 0.13,
   score: -88,
@@ -25,7 +25,7 @@ describe("buildSlackText", () => {
     expect(text).toContain("LINKUSDT");
     expect(text).toContain("做空");
     expect(text).toContain("7.16");
-    expect(text).toContain("7.29");
+    expect(text).toContain("7.42");
     expect(text).toContain("6.77");
     // 倍數標籤跟著 defaultConfig 走,不寫死
     expect(text).toContain(`${defaultConfig().stopATR}×ATR`);

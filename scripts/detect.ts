@@ -79,9 +79,10 @@ if (rows.length === 0) {
         ...defaultPaperConfig(),
         startEquity: PAPER_START,
         intervalMs: intervalMsOf(strategy.interval),
-        // 2026-07-23:移除 exit: "trailing" 覆寫,回到 defaultPaperConfig 的 "fixed"。
-        // 先前改 trailing 的依據(docs §3)是在「停損 2×ATR」的錯誤假設下量的;
-        // 修正停損倍數後重測,fixed(stop1/take3)淨avgR +0.146 明顯優於 trailing 的 −0.014。
+        // 2026-07-23(第二次修正):改回 trailing。當日稍早改 fixed 的依據是 3000 根的
+        // 後 30% 窗口,而該窗口被 2026Q2 單季主導。走動前推(23 季、成本 0.07%)顯示
+        // stop2+trailing2 淨avgR +0.043、賺錢季 14/23,fixed stop1/take3 只有 +0.008、10/23。
+        exit: "trailing" as const,
       };
       const result = await runPaper(
         news,
