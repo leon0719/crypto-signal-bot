@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { SignalFn } from "./backtest.js";
 import { defaultSnrConfig, evalSnrAt } from "./snr.js";
 import { Direction, type Indicators } from "./types.js";
 
@@ -13,6 +14,17 @@ function fakeInd(high: number[], low: number[], close: number[], atr: number): I
 }
 
 const cfg = { ...defaultSnrConfig(), srSpan: 2 };
+
+describe("defaultSnrConfig 預設參數", () => {
+  test("預設參數", () => {
+    expect(defaultSnrConfig()).toEqual({ srSpan: 5, touchATR: 0.3, breakATR: 0.3 });
+  });
+});
+
+test("可包成 backtest 的 SignalFn", () => {
+  const fn: SignalFn = (ind, i) => evalSnrAt(ind, i, cfg, "reversal");
+  expect(typeof fn).toBe("function");
+});
 
 describe("evalSnrAt reversal(A 反轉)", () => {
   // span=2。c=2 是 swing low(100 嚴格低於左右各 2 根)、c=6 是 swing high(124)。
