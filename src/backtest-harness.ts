@@ -166,3 +166,30 @@ export async function loadTestSets(interval: string): Promise<Dataset[]> {
   }
   return out;
 }
+
+export interface Window {
+  label: string; // 顯示用,如 "2022Q3"
+  from: number; // 含
+  to: number; // 不含(半開區間,相鄰窗不重疊不遺漏)
+}
+
+// 把 [from, to] 切成涵蓋它的完整日曆季度。走動前推(walk-forward)分段評估用:
+// 參數固定不動,逐段檢查邊際優勢是否在「沒被調校過的期間」仍然存在。
+export function calendarQuarters(from: number, to: number): Window[] {
+  if (!(from <= to)) return [];
+  const out: Window[] = [];
+  const d = new Date(from);
+  let y = d.getUTCFullYear();
+  let q = Math.floor(d.getUTCMonth() / 3); // 0..3
+  for (;;) {
+    const start = Date.UTC(y, q * 3, 1);
+    const ny = q === 3 ? y + 1 : y;
+    const nq = q === 3 ? 0 : q + 1;
+    const end = Date.UTC(ny, nq * 3, 1);
+    out.push({ label: `${y}Q${q + 1}`, from: start, to: end });
+    if (end > to) break;
+    y = ny;
+    q = nq;
+  }
+  return out;
+}
