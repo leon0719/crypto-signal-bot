@@ -126,7 +126,8 @@ export function evalConfig(
     const filter = mtf
       ? htfEntryFilter(d.klines, d.htf, baseInterval, htfInterval, cfg)
       : undefined;
-    const r = backtest(d.klines, cfg, { ...extra, entryFilter: filter });
+    // mtf=false 時 filter 為 undefined,不可蓋掉呼叫端在 extra 裡帶入的 entryFilter。
+    const r = backtest(d.klines, cfg, { ...extra, entryFilter: filter ?? extra.entryFilter });
     all.push(...r.trades);
     if (r.total >= 5) {
       if (r.profitFactor < minPF) minPF = r.profitFactor;

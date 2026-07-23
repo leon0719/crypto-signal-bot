@@ -1,4 +1,5 @@
-// 回測:用歷史 K 線逐根重跑 evalAt,以 ATR 停損/停利模擬進出場,量化勝率與期望值。
+// 回測:用歷史 K 線逐根重跑進場訊號(預設 evalAt,可經 opts.signal 替換),
+// 以 ATR 停損/停利模擬進出場,量化勝率與期望值。
 //
 // 設計重點(避免前視偏差 look-ahead bias):
 //  - 訊號在第 i 根「收盤」才確定(evalAt 讀 close[i]),故進場價用「下一根 i+1 的開盤」。
@@ -110,6 +111,7 @@ export function backtest(klines: Kline[], cfg: Config, opts: BacktestOptions = {
       risk,
       sig.atr,
       opts,
+      signal,
     );
     trades.push(trade);
 
@@ -132,6 +134,7 @@ function simulateExit(
   risk: number,
   atr: number,
   opts: BacktestOptions,
+  signal: SignalFn,
 ): Trade {
   const n = klines.length;
   const isLong = dir === Direction.Long;
@@ -153,7 +156,7 @@ function simulateExit(
 
     // 反手出場:持倉中若收盤訊號轉為反向,於下一根開盤平倉。
     if (opts.reverseOnSignal && j > entryIndex && j < n - 1) {
-      const s = (opts.signal ?? evalAt)(ind, j);
+      const s = signal(ind, j);
       const reversed =
         s &&
         ((isLong && s.direction === Direction.Short) ||
