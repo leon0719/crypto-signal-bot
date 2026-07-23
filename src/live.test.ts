@@ -28,8 +28,9 @@ const opp = (over: Partial<Opportunity> = {}): Opportunity => ({
   symbol: "BTCUSDT",
   dir: "SHORT",
   entry: 65000,
-  stop: 67000, // 2×ATR=2000 → ATR=1000,atrPct≈1.54 → 槓桿 3x(risk.ts)
+  stop: 67000,
   target: 62000,
+  atr: 1000, // atrPct≈1.54% → 槓桿 3x(risk.ts)
   score: -5,
   regime: "趨勢",
   adx: 30,

@@ -1,5 +1,6 @@
 // Slack 通知:chat.postMessage(bot token)。零相依,只用 fetch。密鑰由環境變數提供。
 import type { Opportunity } from "./detect.js";
+import { defaultConfig } from "./signal.js";
 
 const dirLabel = (dir: "LONG" | "SHORT") => (dir === "SHORT" ? "做空" : "做多");
 const dirEmoji = (dir: "LONG" | "SHORT") => (dir === "SHORT" ? "🔴" : "🟢");
@@ -7,12 +8,14 @@ const fmtHtf = (n: number | null) => (n == null ? "—" : n.toFixed(1));
 
 // 組一則 Slack 純文字訊息:摘要 + 每個機會一段 + 免責。
 export function buildSlackText(opps: Opportunity[]): string {
+  // 倍數標籤取自同一份設定,避免文案與實際停損脫節(2026-07-23 前曾寫死 2×ATR)。
+  const { stopATR, takeATR } = defaultConfig();
   const header = `⏰ 4h 掃描 · 發現 ${opps.length} 個新進場機會`;
   const blocks = opps.map(
     (o) =>
       `${dirEmoji(o.dir)} *${o.symbol} ${dirLabel(o.dir)}*\n` +
       `   4h${o.regime} · ADX ${o.adx.toFixed(0)} · 日線 ${fmtHtf(o.htf1d)} · OI ${o.oi ?? "—"}\n` +
-      `   進場 ${o.entry} ｜ 停損 ${o.stop} (2×ATR) ｜ 目標 ${o.target} (3×ATR)`,
+      `   進場 ${o.entry} ｜ 停損 ${o.stop} (${stopATR}×ATR) ｜ 目標 ${o.target} (${takeATR}×ATR)`,
   );
   const footer = "⚠️ 技術面訊號,非投資建議。務必照停損操作。";
   return [header, "", ...blocks, "", footer].join("\n");

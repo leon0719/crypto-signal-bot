@@ -5,13 +5,16 @@ import { suggestLeverage } from "./risk.js";
 
 export interface PaperConfig {
   startEquity: number; // 起始權益(USDT)
-  riskPct: number; // 每筆風險佔「開倉時權益」比例(2×ATR 停損 = 此金額)
+  riskPct: number; // 每筆風險佔「開倉時權益」比例(命中初始停損 = 此金額)
   leverage: number; // 舊帳本部位的 fallback 槓桿(新部位改依 ATR 動態計算,見 risk.ts)
   feeRoundTrip: number; // 來回手續費佔名目比例(回測用 0.2%)
   intervalMs: number; // 訊號週期(4h)
-  // 出場模式:"fixed" 固定 2×ATR 停損/3×ATR 停利;"trailing" 停損隨波段高/低點以
-  // 2×ATR 距離移動、無固定停利(回測驗證 avgR 0.08→0.15,語意同 backtest.ts)。
+  // 出場模式:"fixed" 用 detect 算好的停損/停利(倍數見 signal.ts 的 stopATR/takeATR);
+  // "trailing" 停損隨波段高/低點移動、無固定停利(語意同 backtest.ts)。
   exit: "fixed" | "trailing";
+  // trailing 的移動距離(×ATR)。刻意與初始停損倍數解耦——回測驗證的是 2×ATR 移動,
+  // 若由 |entry−stop| 反推,調整 stopATR 會連帶改掉未經驗證的 trailing 行為。
+  trailATR: number;
 }
 
 export const defaultPaperConfig = (): PaperConfig => ({
@@ -21,6 +24,7 @@ export const defaultPaperConfig = (): PaperConfig => ({
   feeRoundTrip: 0.002,
   intervalMs: 4 * 3_600_000,
   exit: "fixed",
+  trailATR: 2,
 });
 
 export type PaperStatus = "OPEN" | "STOP" | "TARGET";
@@ -34,6 +38,7 @@ export interface PaperPosition {
   target: number;
   entryTime: number; // 進場毫秒(掃描時刻)
   entryBarOpen: number; // 進場那根 4h 棒的 openTime(判定時只看「之後」的棒,避免看未來)
+  atr?: number; // 進場當根 ATR(舊帳本無此欄位 → trailing 退回用停損距離)
   riskAmount: number; // 開倉時 equity×riskPct
   notional: number; // 名目部位
   qty: number; // 數量
@@ -63,8 +68,8 @@ export function sizePosition(
   const stopFrac = stopDist / o.entry;
   const notional = riskAmount / stopFrac; // 命中停損恰好虧 riskAmount(未計手續費)
   const qty = notional / o.entry;
-  // Opportunity 無 atr 欄位,但 detect 的停損固定是 2×ATR → 由停損距離精確反推。
-  const leverage = suggestLeverage(stopDist / 2, o.entry);
+  // 槓桿看波動度本身(ATR),不由停損距離反推——停損倍數 cfg.stopATR 一改,反推就錯。
+  const leverage = suggestLeverage(o.atr, o.entry);
   const marginUsed = notional / leverage;
   const liq = o.dir === "LONG" ? o.entry * (1 - 1 / leverage) : o.entry * (1 + 1 / leverage);
   const entryBarOpen = Math.floor(entryTime / cfg.intervalMs) * cfg.intervalMs;
@@ -75,6 +80,7 @@ export function sizePosition(
     entry: o.entry,
     stop: o.stop,
     target: o.target,
+    atr: o.atr,
     entryTime,
     entryBarOpen,
     riskAmount,
@@ -128,10 +134,12 @@ export function settlePosition(pos: PaperPosition, bars: Bar[], cfg: PaperConfig
 
 // trailing 結算:同一根先用「前棒為止」的 trail 判定觸及(不前視),再用本棒高/低更新
 // trail 供下一根使用。未觸發時把 trail/extreme/settledBarOpen 落盤,下輪只處理新棒——
-// 部位存活超過 K 線回看窗也不會失真。移動距離 = 進場停損距(即 2×ATR)。
+// 部位存活超過 K 線回看窗也不會失真。移動距離 = cfg.trailATR × 進場當根 ATR;
+// 舊帳本部位無 atr 欄位時退回用進場停損距離(維持既有行為,不追溯改寫)。
 function settleTrailing(pos: PaperPosition, bars: Bar[], cfg: PaperConfig): PaperPosition {
   const isLong = pos.dir === "LONG";
-  const trailDist = Math.abs(pos.entry - pos.stop);
+  const trailDist =
+    pos.atr != null && pos.atr > 0 ? cfg.trailATR * pos.atr : Math.abs(pos.entry - pos.stop);
   let trail = pos.trail ?? pos.stop;
   let extreme = pos.extreme ?? (isLong ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY);
   let last = pos.settledBarOpen ?? pos.entryBarOpen;

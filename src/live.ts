@@ -1,5 +1,5 @@
 // 實盤下單:訊號 → 護欄 → 部位計算 → OKX 下單 → 記帳/通報。
-// 部位規則與紙上一致:每筆風險 = 權益 × riskPct(2×ATR 停損),槓桿依 ATR 動態(risk.ts)。
+// 部位規則與紙上一致:每筆風險 = 權益 × riskPct(命中初始停損),槓桿依 ATR 動態(risk.ts)。
 import type { Opportunity } from "./detect.js";
 import {
   type LiveLedger,
@@ -68,7 +68,8 @@ export function planOrder(
       skip: `張數 ${contracts} 低於最小下單量 ${inst.minSz}(風險額 ${riskAmount.toFixed(1)} USDT 太小)`,
     };
   }
-  const leverage = suggestLeverage(stopDist / 2, o.entry); // 停損距離 = 2×ATR
+  // 槓桿看波動度本身(ATR),不由停損距離反推——停損倍數 cfg.stopATR 一改,反推就錯。
+  const leverage = suggestLeverage(o.atr, o.entry);
   const notional = Number(contracts) * inst.ctVal * o.entry;
   return {
     instId: inst.instId,

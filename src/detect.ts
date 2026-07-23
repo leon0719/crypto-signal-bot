@@ -1,6 +1,7 @@
 // 偵測純邏輯:把掃描列篩成可進場機會、算停損停利、與上輪狀態做去重 diff。
 import type { ScanRow } from "./scan.js";
-import type { Regime } from "./types.js";
+import { defaultConfig } from "./signal.js";
+import type { Config, Regime } from "./types.js";
 
 export interface Opportunity {
   symbol: string;
@@ -8,6 +9,7 @@ export interface Opportunity {
   entry: number;
   stop: number;
   target: number;
+  atr: number; // 訊號當根 ATR;下游(定量/槓桿)直接用,不由停損距離反推
   score: number;
   regime: Regime;
   adx: number;
@@ -22,16 +24,23 @@ function roundToPrice(n: number, price: number): number {
   return Math.round(n * f) / f;
 }
 
-// 停損停利:2×ATR 停損、3×ATR 目標,方向決定加減,精度隨價格量級。
+// 停損停利:倍數取自 signal.ts 的 Config,方向決定加減,精度隨價格量級。
+//
+// 2026-07-23:此處原本寫死 2×ATR 停損,與回測驗證的 cfg.stopATR = 1.0 不同步,
+// 等於實盤跑的 R:R 是 1.5 而非 1:3——樣本外淨 avgR 因此從 0.146 掉到 0.054。
+// 倍數只能有一個真實來源,回測調參數時實盤必須跟著變。
 export function computeLevels(
   dir: "LONG" | "SHORT",
   price: number,
   atr: number,
+  cfg: Pick<Config, "stopATR" | "takeATR"> = defaultConfig(),
 ): { stop: number; target: number } {
   const r = (n: number) => roundToPrice(n, price);
+  const stopDist = cfg.stopATR * atr;
+  const takeDist = cfg.takeATR * atr;
   return dir === "SHORT"
-    ? { stop: r(price + 2 * atr), target: r(price - 3 * atr) }
-    : { stop: r(price - 2 * atr), target: r(price + 3 * atr) };
+    ? { stop: r(price + stopDist), target: r(price - takeDist) }
+    : { stop: r(price - stopDist), target: r(price + takeDist) };
 }
 
 // 只保留有效方向(通過三重確認)的列,轉成含進出場位的機會。
@@ -47,6 +56,7 @@ export function filterOpportunities(rows: ScanRow[]): Opportunity[] {
       entry: r.price,
       stop,
       target,
+      atr: r.atr,
       score: r.score,
       regime: r.regime,
       adx: r.adx,

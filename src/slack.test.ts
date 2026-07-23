@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import type { Opportunity } from "./detect.js";
+import { defaultConfig } from "./signal.js";
 import { buildSlackText, postMessage } from "./slack.js";
 
 afterEach(() => mock.restore());
@@ -8,8 +9,9 @@ const link: Opportunity = {
   symbol: "LINKUSDT",
   dir: "SHORT",
   entry: 7.16,
-  stop: 7.42,
+  stop: 7.29,
   target: 6.77,
+  atr: 0.13,
   score: -88,
   regime: "趨勢",
   adx: 36,
@@ -23,9 +25,10 @@ describe("buildSlackText", () => {
     expect(text).toContain("LINKUSDT");
     expect(text).toContain("做空");
     expect(text).toContain("7.16");
-    expect(text).toContain("7.42");
+    expect(text).toContain("7.29");
     expect(text).toContain("6.77");
-    expect(text).toContain("2×ATR");
+    // 倍數標籤跟著 defaultConfig 走,不寫死
+    expect(text).toContain(`${defaultConfig().stopATR}×ATR`);
     expect(text).toContain("非投資建議");
     expect(text).toContain("1 個"); // 摘要數量
   });

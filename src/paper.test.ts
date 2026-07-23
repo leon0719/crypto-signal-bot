@@ -22,8 +22,9 @@ const T0 = HOUR4 * 1000; // 對齊 4h 的整點進場時刻
 function opp(p: Partial<Opportunity> & Pick<Opportunity, "symbol" | "dir">): Opportunity {
   return {
     entry: 100,
-    stop: 96, // 2×ATR=4 → 停損距 4%
-    target: 106, // 3×ATR=6
+    stop: 96, // 停損距 4%
+    target: 106,
+    atr: 2, // 2% → 動態槓桿 3x
     score: 50,
     regime: "趨勢",
     adx: 30,
@@ -59,10 +60,11 @@ describe("sizePosition:固定風險 1%", () => {
 });
 
 describe("sizePosition:ATR 動態槓桿", () => {
+  // 槓桿改由 Opportunity.atr 直接決定,不再由停損距離反推——
+  // 停損倍數(cfg.stopATR)一旦調整,反推法就會算錯槓桿。
   test("低波動(ATR 0.5%)→ 5x,保證金與強平價按 5x 計", () => {
-    // entry 100、stop 99 → stopDist 1 → ATR = 0.5 → 0.5% → 5x
     const pos = sizePosition(
-      opp({ symbol: "BTCUSDT", dir: "LONG", entry: 100, stop: 99, target: 101.5 }),
+      opp({ symbol: "BTCUSDT", dir: "LONG", entry: 100, stop: 99, target: 101.5, atr: 0.5 }),
       2000,
       T0,
       cfg,
@@ -72,9 +74,9 @@ describe("sizePosition:ATR 動態槓桿", () => {
     expect(pos.liq).toBeCloseTo(100 * (1 - 1 / 5), 6);
   });
   test("中波動(ATR 2%)→ 3x", () => {
-    // entry 100、stop 96 → stopDist 4 → ATR = 2 → 2% → 3x(邊界屬低風險檔)
+    // 2% 為邊界,屬低風險檔
     const pos = sizePosition(
-      opp({ symbol: "ETHUSDT", dir: "LONG", entry: 100, stop: 96, target: 106 }),
+      opp({ symbol: "ETHUSDT", dir: "LONG", entry: 100, stop: 96, target: 106, atr: 2 }),
       2000,
       T0,
       cfg,
@@ -83,9 +85,8 @@ describe("sizePosition:ATR 動態槓桿", () => {
     expect(pos.marginUsed).toBeCloseTo(pos.notional / 3, 6);
   });
   test("高波動(ATR 4%)→ 1x,SHORT 強平價在上方", () => {
-    // entry 100、stop 108(SHORT)→ stopDist 8 → ATR = 4 → 4% → 1x
     const pos = sizePosition(
-      opp({ symbol: "SOLUSDT", dir: "SHORT", entry: 100, stop: 108, target: 88 }),
+      opp({ symbol: "SOLUSDT", dir: "SHORT", entry: 100, stop: 108, target: 88, atr: 4 }),
       2000,
       T0,
       cfg,
@@ -93,6 +94,24 @@ describe("sizePosition:ATR 動態槓桿", () => {
     expect(pos.leverage).toBe(1);
     expect(pos.liq).toBeCloseTo(100 * (1 + 1 / 1), 6);
   });
+  test("槓桿看 atr 而非停損距:同樣停損距、不同 atr → 不同槓桿", () => {
+    // 兩者停損距都是 4(4%),但 atr 不同 → 舊的 stopDist/2 反推法會給出相同槓桿。
+    const tight = sizePosition(
+      opp({ symbol: "BTCUSDT", dir: "LONG", entry: 100, stop: 96, atr: 0.5 }),
+      2000,
+      T0,
+      cfg,
+    );
+    const wide = sizePosition(
+      opp({ symbol: "SOLUSDT", dir: "LONG", entry: 100, stop: 96, atr: 4 }),
+      2000,
+      T0,
+      cfg,
+    );
+    expect(tight.leverage).toBe(5);
+    expect(wide.leverage).toBe(1);
+  });
+
   test("舊帳本部位(無 leverage 欄位)結算不受影響", () => {
     const legacy = sizePosition(
       opp({ symbol: "BTCUSDT", dir: "LONG", entry: 100, stop: 96, target: 112 }),
@@ -360,5 +379,43 @@ describe("markToMarket", () => {
   test("多單現價高於進場 → 正浮動(扣手續費)", () => {
     const pos = sizePosition(opp({ symbol: "BTCUSDT", dir: "LONG" }), 2000, T0, cfg);
     expect(markToMarket(pos, 103, cfg)).toBeGreaterThan(0);
+  });
+});
+
+describe("trailing 距離與停損倍數解耦", () => {
+  // 回測驗證的 trailing 是固定 2×ATR,與初始停損倍數(cfg.stopATR)無關。
+  // 先前 trailDist 由 |entry−stop| 反推,停損倍數一改 trailing 就跟著變——
+  // 那不是被回測驗證過的設定。
+  const tcfg = { ...cfg, exit: "trailing" as const, trailATR: 2 };
+  const barsAt = (bars: Array<Partial<Bar>>): Bar[] =>
+    bars.map((b, i) => ({ openTime: T0 + (i + 1) * HOUR4, high: 100, low: 100, close: 100, ...b }));
+
+  test("停損 1×ATR 時,trailing 仍以 2×ATR 移動", () => {
+    // entry 100、atr 2、stopATR 1 → 初始停損 98(風險 2)。
+    // bar1 高點 110 → trail = 110 − 2×2 = 106;bar2 低點 105.9 觸及 → R = (106−100)/2 = +3。
+    const pos = sizePosition(
+      opp({ symbol: "BTCUSDT", dir: "LONG", entry: 100, stop: 98, target: 106, atr: 2 }),
+      2000,
+      T0,
+      tcfg,
+    );
+    const done = settlePosition(pos, barsAt([{ high: 110, low: 101 }, { low: 105.9 }]), tcfg);
+    expect(done.status).toBe("STOP");
+    expect(done.exitPrice).toBeCloseTo(106, 6);
+    expect(done.rMultiple).toBeCloseTo(3, 6);
+  });
+
+  test("舊帳本部位(無 atr 欄位)退回用停損距離,結算不炸", () => {
+    const pos = sizePosition(
+      opp({ symbol: "BTCUSDT", dir: "LONG", entry: 100, stop: 96, target: 106, atr: 2 }),
+      2000,
+      T0,
+      tcfg,
+    );
+    const { atr: _drop, ...rest } = pos;
+    const legacy = rest as PaperPosition;
+    const done = settlePosition(legacy, barsAt([{ high: 108, low: 101 }, { low: 103.9 }]), tcfg);
+    expect(done.status).toBe("STOP");
+    expect(done.exitPrice).toBeCloseTo(104, 6); // 108 − |100−96| = 104
   });
 });
