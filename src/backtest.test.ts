@@ -228,3 +228,41 @@ describe("backtest 回傳的 riskPrice", () => {
     }
   });
 });
+
+describe("進場訊號 hook", () => {
+  const kl = Array.from({ length: 400 }, (_, i) => ({
+    openTime: i * 3_600_000,
+    open: 100 + i * 0.5,
+    high: 101 + i * 0.5,
+    low: 99 + i * 0.5,
+    close: 100.5 + i * 0.5,
+    volume: 1000,
+  }));
+
+  test("不傳 signal 時結果與現況相同", () => {
+    const cfg = defaultConfig();
+    const a = backtest(kl, cfg);
+    const b = backtest(kl, cfg, {});
+    expect(b.total).toBe(a.total);
+    expect(b.totalR).toBeCloseTo(a.totalR, 10);
+  });
+
+  test("傳入自訂 signal 時改用該訊號來源", () => {
+    const cfg = defaultConfig();
+    // 只在索引 300 出一次多單訊號,其餘一律觀望。
+    const r = backtest(kl, cfg, {
+      signal: (ind, i) =>
+        i === 300
+          ? { direction: Direction.Long, atr: ind.atr[i], price: ind.close[i] }
+          : { direction: Direction.Neutral, atr: ind.atr[i], price: ind.close[i] },
+    });
+    expect(r.total).toBe(1);
+    expect(r.trades[0].entryIndex).toBe(301);
+    expect(r.trades[0].direction).toBe(Direction.Long);
+  });
+
+  test("signal 回 null 時視為無訊號", () => {
+    const r = backtest(kl, defaultConfig(), { signal: () => null });
+    expect(r.total).toBe(0);
+  });
+});

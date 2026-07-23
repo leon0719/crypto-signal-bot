@@ -7,7 +7,13 @@
 //  - 一次只持一倉,平倉後才尋找下一個訊號(不重疊、不加碼)。
 
 import { build, evalAt, minBars } from "./signal.js";
-import { type Config, Direction, type DirectionValue, type Kline } from "./types.js";
+import {
+  type Config,
+  Direction,
+  type DirectionValue,
+  type Indicators,
+  type Kline,
+} from "./types.js";
 
 export interface Trade {
   direction: DirectionValue;
@@ -36,6 +42,16 @@ export interface BacktestResult {
   avgBarsHeld: number; // 平均持倉根數
 }
 
+// 回測的進場訊號來源。回傳 Neutral 或 null 皆視為「本根無訊號」。
+// 預設為 signal.ts 的 evalAt;換成 snr.ts 的 evalSnrAt 即可回測 SNR 策略,
+// 出場與風險計算完全共用,確保 A/B 比較的唯一變因是進場。
+export interface SignalHit {
+  direction: DirectionValue;
+  atr: number;
+  price: number;
+}
+export type SignalFn = (ind: Indicators, i: number) => SignalHit | null;
+
 export interface BacktestOptions {
   // 持倉中若出現「反向訊號」就平倉反手(預設 false,只靠停損/停利出場)。
   reverseOnSignal?: boolean;
@@ -47,6 +63,8 @@ export interface BacktestOptions {
   //  - "trailing":無固定停利,停損隨波段高/低點以 trailATR×ATR 移動(讓贏單跟趨勢)。
   exit?: "fixed" | "trailing";
   trailATR?: number; // trailing 模式的移動距離(×ATR),預設 2。
+  // 進場訊號來源,省略時為 evalAt(現有評分策略)。
+  signal?: SignalFn;
 }
 
 export function backtest(klines: Kline[], cfg: Config, opts: BacktestOptions = {}): BacktestResult {
@@ -54,10 +72,11 @@ export function backtest(klines: Kline[], cfg: Config, opts: BacktestOptions = {
   const n = klines.length;
   const start = minBars(cfg); // 第一根可評估的索引
   const trades: Trade[] = [];
+  const signal: SignalFn = opts.signal ?? evalAt;
 
   let i = start;
   while (i < n - 1) {
-    const sig = evalAt(ind, i);
+    const sig = signal(ind, i);
     if (!sig || sig.direction === Direction.Neutral) {
       i++;
       continue;
@@ -134,7 +153,7 @@ function simulateExit(
 
     // 反手出場:持倉中若收盤訊號轉為反向,於下一根開盤平倉。
     if (opts.reverseOnSignal && j > entryIndex && j < n - 1) {
-      const s = evalAt(ind, j);
+      const s = (opts.signal ?? evalAt)(ind, j);
       const reversed =
         s &&
         ((isLong && s.direction === Direction.Short) ||
