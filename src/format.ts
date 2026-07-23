@@ -302,14 +302,14 @@ export function buildBubble(
     body.push(kvRow("停利", `${fmtNum(p.target)}  (+${p.winPct.toFixed(1)}%)`, COLOR.long, "bold"));
     body.push(kvRow("賺賠比", `${p.rr.toFixed(1)} : 1`));
 
-    // 移動停損建議(無狀態,純文字提示):回測顯示「2×ATR 移動停損」優於固定停利——
-    // 順勢策略靠少數大波段獲利,別在固定停利就全出,讓贏單跟著趨勢跑。
-    const trailPct = ((2 * res.atr) / p.entry) * 100;
-    const trailAnchor = isLong ? "波段高點 − 2×ATR" : "波段低點 + 2×ATR";
-    const trailDir = isLong ? "上移" : "下移";
+    // 出場紀律(無狀態,純文字提示)。
+    // 2026-07-23:此處原本建議「2×ATR 移動停損」,依據是 docs §3——但那組數字是在
+    // 「停損 2×ATR」的錯誤假設下量的。修正停損倍數後重測(4h、8 主流幣、樣本外、
+    // MTF on、含成本):固定 1:3 淨avgR +0.146,移動停損 −0.014。改為建議固定出場。
+    const cfg = ind.cfg;
     body.push({
       type: "text",
-      text: `🔒 移動停損(建議):停損改掛「${trailAnchor}(約 ${trailPct.toFixed(1)}%)」,隨新${isLong ? "高" : "低"}${trailDir};別在上方停利就全出,讓利潤奔跑。`,
+      text: `🔒 出場紀律:停損與停利同時掛好就別再動它。回測顯示固定 ${cfg.takeATR}:${cfg.stopATR} 出場優於移動停損——提前手動獲利了結會把賺賠比壓垮,而這個策略的勝率本來就靠賠率撐。`,
       size: "xs",
       color: COLOR.sub,
       wrap: true,
